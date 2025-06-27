@@ -1,0 +1,5 @@
+{
+  "name": "thumbio-multiplayer-test",
+  "main": "partykit/server.js",
+  "compatibilityDate": "2025-06-26"
+}
