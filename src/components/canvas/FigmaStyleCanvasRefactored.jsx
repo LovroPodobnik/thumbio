@@ -4,33 +4,33 @@ import * as PIXI from 'pixi.js';
 // Import refactored components
 import CommentPin from './CommentPin';
 import CommentDialog from './CommentDialog';
-import CommentModeIndicator from './CommentModeIndicator';
-import DrawingModeIndicator from './DrawingModeIndicator';
 import SidebarAnalytics from './SidebarAnalytics';
 import SidebarArtDirector from './SidebarArtDirector';
 import SelectionIndicator from './SelectionIndicator';
 import ThumbnailActions from './ThumbnailActions';
 import YouTubeImporter from './YouTubeImporter';
-import UnifiedToolbar from './UnifiedToolbar';
-import WelcomeSidebar from './WelcomeSidebar';
+import TopToolbar from './TopToolbar';
+import ToolSettingsPanel from './ToolSettingsPanel';
+import MainSidebar from './MainSidebar';
+import ContentImportSidebar from './ContentImportSidebar';
 import RemoteCursors from './RemoteCursors';
-import MultiplayerStatus from './MultiplayerStatus';
+import CanvasViewportControlsRefactored from './CanvasViewportControlsRefactored';
+import { useCanvasToolsIntegrated } from '../../hooks/useCanvasToolsIntegrated';
+import { usePixiRenderer } from '../../hooks/usePixiRenderer';
+
+// Import state management
+import { CanvasStateProvider, useCanvasState } from '../../state/canvasState';
+import { useCanvasActions, useSelectionActions, useUIActions, useHistoryActions } from '../../hooks/useCanvasActions';
 import { multiplayerManager } from '../../services/multiplayerManager';
-import { createThumbnailContainer, setupThumbnailInteractions, updateThumbnailEventMode } from './ThumbnailRenderer';
-import { createTextLabelContainer, setupTextLabelInteractions, updateTextLabel, createLabelData, DEFAULT_LABEL_STYLE } from './TextLabelRenderer';
-import { drawGrid, setupCanvasControls, createGridSprite, updateGridPosition } from './CanvasControls';
+import { updateThumbnailEventMode } from './ThumbnailRenderer';
+import { updateTextLabel, DEFAULT_LABEL_STYLE } from './TextLabelRenderer';
+import { setupCanvasControls, createGridSprite, updateGridPosition } from './CanvasControls';
 import { drawSelectionRect, clearSelectionRect, createRectFromPoints, getIntersectingThumbnails, getIntersectingTextLabels, throttle } from './SelectionRectangle';
 import { 
   createDrawingSystem, 
-  createDrawingGraphics, 
   renderFreehandStroke, 
-  renderLine, 
-  renderRectangle, 
-  addDrawingToLayer, 
-  removeDrawingFromLayer,
   createDrawingData,
-  smoothPath,
-  DEFAULT_DRAWING_STYLE 
+  smoothPath
 } from './DrawingRenderer';
 
 // Configure PIXI global settings for high-DPI support
@@ -44,7 +44,13 @@ if (typeof window !== 'undefined' && window.devicePixelRatio) {
   PIXI.TextureSource.defaultOptions.resolution = window.devicePixelRatio || 1;
 }
 
-const FigmaStyleCanvasRefactored = () => {
+const FigmaStyleCanvasInternal = () => {
+  // Get state and actions from context
+  const state = useCanvasState();
+  const canvasActions = useCanvasActions();
+  const selectionActions = useSelectionActions();
+  const uiActions = useUIActions();
+  const historyActions = useHistoryActions();
   const containerRef = useRef();
   const appRef = useRef();
   const viewportRef = useRef();
@@ -55,6 +61,7 @@ const FigmaStyleCanvasRefactored = () => {
   const tempDrawingGraphicsRef = useRef();
   const currentDrawingRef = useRef(null);
   const isDrawingModeRef = useRef(false);
+  const isHandToolModeRef = useRef(false);
   const isAddingCommentRef = useRef(false);
   const isSpacePanningRef = useRef(false);
   const drawingSettingsRef = useRef({
@@ -67,54 +74,135 @@ const FigmaStyleCanvasRefactored = () => {
   const isAddingLabelRef = useRef(false);
   const labelSettingsRef = useRef(DEFAULT_LABEL_STYLE);
   
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [thumbnailPositions, setThumbnailPositions] = useState({});
-  const [comments, setComments] = useState([]);
-  const [isAddingComment, setIsAddingComment] = useState(false);
-  const [textLabels, setTextLabels] = useState([]);
-  const [labelPositions, setLabelPositions] = useState({});
-  const [isAddingLabel, setIsAddingLabel] = useState(false);
-  // Removed pendingLabelPos - labels are created immediately on click
-  const [editingLabel, setEditingLabel] = useState(null);
-  const [labelSettings, setLabelSettings] = useState(DEFAULT_LABEL_STYLE);
-  const [selectedLabelIds, setSelectedLabelIds] = useState(new Set());
-  const [pendingCommentPos, setPendingCommentPos] = useState(null);
-  const [viewportTransform, setViewportTransform] = useState({ x: 0, y: 0, scale: 1 });
-  const [draggedComment, setDraggedComment] = useState(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [editingComment, setEditingComment] = useState(null);
-  const [showAnalytics, setShowAnalytics] = useState(false);
-  const [selectedCritique, setSelectedCritique] = useState(null);
-  const [lockedThumbnails, setLockedThumbnails] = useState(new Set());
-  const [youtubeThumbnails, setYoutubeThumbnails] = useState([]);
+  // Extract state from context
+  const { 
+    canvas: { 
+      youtubeThumbnails, 
+      thumbnailPositions, 
+      comments, 
+      textLabels, 
+      labelPositions, 
+      lockedThumbnails,
+      drawings
+    },
+    selection: { 
+      selectedIds, 
+      selectedLabelIds, 
+      selectedLabelText 
+    },
+    ui: { 
+      viewportTransform,
+      pendingCommentPos,
+      editingComment,
+      editingLabel,
+      showAnalytics,
+      selectedCritique,
+      draggedComment,
+      dragOffset,
+      sidebarOpen,
+      sidebarWidth,
+      showContentImportSidebar,
+      showYouTubeImporter
+    },
+    tools: {
+      drawing: drawingSettings,
+      label: labelSettings
+    }
+  } = state;
   
-  // Multiplayer state
+  // Multiplayer state (not migrated to global state yet)
   const [isMultiplayerEnabled, setIsMultiplayerEnabled] = useState(false);
   const [isMultiplayerConnected, setIsMultiplayerConnected] = useState(false);
   const [remoteCursors, setRemoteCursors] = useState({});
   const [multiplayerUserCount, setMultiplayerUserCount] = useState(0);
   const [currentMultiplayerUser, setCurrentMultiplayerUser] = useState(null);
   const lastCursorPositionRef = useRef({ x: 0, y: 0 });
-  const cursorThrottleRef = useRef(null);
   
-  // Drawing state management
-  const [isDrawingMode, setIsDrawingMode] = useState(false);
-  const [drawings, setDrawings] = useState([]);
-  const [currentDrawing, setCurrentDrawing] = useState(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [drawingSettings, setDrawingSettings] = useState({
-    isEraserMode: false,
-    brushSize: 4,
-    brushColor: '#3b82f6'
+  // Local drawing state
+  const [, setCurrentDrawing] = useState(null);
+  const [, setIsDrawing] = useState(false);
+  
+  // Helper to update thumbnail event modes - moved here to avoid temporal dead zone
+  const updateAllThumbnailEventModes = (isDrawingMode) => {
+    if (thumbnailContainersRef.current) {
+      thumbnailContainersRef.current.forEach(container => {
+        if (container.userData && container.userData.id) {
+          // Only disable thumbnail interactions for drawing mode
+          // Hand tool should NOT affect thumbnail selection
+          updateThumbnailEventMode(container, isDrawingMode);
+        }
+      });
+    }
+  };
+  
+  // Rectangular selection state - moved before canvasTools to avoid reference error
+  const [, setSelectionRect] = useState(null);
+  const [, setIsRectSelecting] = useState(false);
+
+  // History actions from context - no more manual history management!
+  const { undo, redo } = historyActions;
+  
+  const canvasTools = useCanvasToolsIntegrated({
+    appRef,
+    viewportRef,
+    viewportTransform,
+    setViewportTransform: uiActions.setViewportTransform,
+    updateAllThumbnailEventModes,
+    historyActions: {
+      undo,
+      redo,
+    },
+    setIsSelecting: setIsRectSelecting,
+    setSelectionStart: () => {},
+    setSelectionEnd: () => {},
+    isSpacePanning: isSpacePanningRef.current,
   });
   
-  // Rectangular selection state
-  const [selectionRect, setSelectionRect] = useState(null);
-  const [isRectSelecting, setIsRectSelecting] = useState(false);
+  // Only show YouTube thumbnails - no mock data
+  const thumbnails = useMemo(() => {
+    return youtubeThumbnails;
+  }, [youtubeThumbnails]);
+
+  // Initialize PixiJS thumbnail and label rendering
+  usePixiRenderer(
+    appRef,
+    viewportRef,
+    drawingSystemRef,
+    tempDrawingGraphicsRef,
+    gridGraphicsRef,
+    {
+      thumbnails,
+      selectedIds,
+      thumbnailPositions,
+      lockedThumbnails,
+      drawings,
+      textLabels,
+      labelPositions,
+      selectedLabelIds,
+      isDrawingModeRef,
+      setSelectedIds: selectionActions.setSelection,
+      setThumbnailPositions: canvasActions.updateThumbnailPositions,
+      setSelectedLabelIds: selectionActions.setLabelSelection,
+      setLabelPositions: canvasActions.updateLabelPositions,
+      setEditingLabel: uiActions.setEditingLabel,
+    }
+  );
+
+  // Destructure the tools we need from canvasTools
+  const {
+    activeTool,
+    isSpacePanning,
+    isHandToolMode,
+    isDrawingMode,
+    isAddingComment,
+    isAddingLabel,
+    toolActions,
+    zoomActions,
+  } = canvasTools;
   const selectionRectGraphicsRef = useRef();
   
   // Check if user has ever imported videos (for first-time experience)
-  const [hasImportedBefore, setHasImportedBefore] = useState(() => {
+  const [, setHasImportedBefore] = useState(() => {
     try {
       return localStorage.getItem('hasImportedVideos') === 'true';
     } catch {
@@ -122,34 +210,9 @@ const FigmaStyleCanvasRefactored = () => {
     }
   });
   
-  // Check if user has seen welcome sidebar (for first-time experience)
-  const [hasSeenWelcome, setHasSeenWelcome] = useState(() => {
-    try {
-      return localStorage.getItem('hasSeenWelcome') === 'true';
-    } catch {
-      return false;
-    }
-  });
-  
-  // Welcome sidebar state
-  const [showWelcomeSidebar, setShowWelcomeSidebar] = useState(!hasSeenWelcome);
-  
-  // Show YouTube importer automatically for first-time users (but not if welcome sidebar is shown)
-  const [showYouTubeImporter, setShowYouTubeImporter] = useState(!hasImportedBefore && hasSeenWelcome);
-  
-  // Undo/Redo system
-  const [history, setHistory] = useState([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const maxHistorySize = 50;
-  
-  // Only show YouTube thumbnails - no mock data
-  const thumbnails = useMemo(() => {
-    return youtubeThumbnails;
-  }, [youtubeThumbnails]);
-  
   // Throttled intersection update for performance - reduced throttling for better responsiveness
   const throttledUpdateSelection = useMemo(
-    () => throttle((rect, modifierKeys) => {
+    () => throttle((rect) => {
       if (!rect) return;
       
       // Handle thumbnail intersections
@@ -197,106 +260,29 @@ const FigmaStyleCanvasRefactored = () => {
     []
   );
   
-  // Save state to history for undo/redo
-  const saveToHistory = (action, data) => {
-    const state = {
-      action,
-      timestamp: Date.now(),
-      data: {
-        thumbnailPositions: { ...thumbnailPositions },
-        comments: [...comments],
-        selectedIds: new Set(selectedIds),
-        selectedLabelIds: new Set(selectedLabelIds),
-        lockedThumbnails: new Set(lockedThumbnails),
-        youtubeThumbnails: [...youtubeThumbnails],
-        drawings: [...drawings],
-        textLabels: [...textLabels],
-        labelPositions: { ...labelPositions },
-        ...data
-      }
-    };
-    
-    setHistory(prev => {
-      // Remove any history after current index (when undoing then making new changes)
-      const newHistory = prev.slice(0, historyIndex + 1);
-      newHistory.push(state);
-      
-      // Keep history size manageable
-      if (newHistory.length > maxHistorySize) {
-        return newHistory.slice(-maxHistorySize);
-      }
-      
-      return newHistory;
-    });
-    
-    setHistoryIndex(prev => Math.min(prev + 1, maxHistorySize - 1));
-  };
+  // Functions moved to before useCanvasToolsIntegrated to avoid temporal dead zone
   
-  // Undo function
-  const undo = () => {
-    if (historyIndex > 0 && history.length > historyIndex - 1) {
-      const previousState = history[historyIndex - 1];
-      
-      // Check if previousState and its data exist
-      if (!previousState || !previousState.data) {
-        console.warn('[Undo] Invalid previous state, skipping undo');
-        return;
-      }
-      
-      const { data } = previousState;
-      
-      // Restore state with fallbacks
-      if (data.thumbnailPositions) setThumbnailPositions(data.thumbnailPositions);
-      if (data.comments) setComments(data.comments);
-      if (data.selectedIds) setSelectedIds(data.selectedIds);
-      if (data.selectedLabelIds) setSelectedLabelIds(data.selectedLabelIds);
-      if (data.lockedThumbnails) setLockedThumbnails(data.lockedThumbnails);
-      if (data.youtubeThumbnails) setYoutubeThumbnails(data.youtubeThumbnails);
-      if (data.drawings) setDrawings(data.drawings);
-      if (data.textLabels) setTextLabels(data.textLabels);
-      if (data.labelPositions) setLabelPositions(data.labelPositions);
-      
-      setHistoryIndex(prev => prev - 1);
-      
-      console.log(`[Undo] Restored to: ${previousState.action}`);
+  // Sidebar handlers
+  const handleSidebarToggle = () => {
+    const newOpen = !sidebarOpen;
+    uiActions.setSidebarState(newOpen);
+    try {
+      localStorage.setItem('sidebarOpen', String(newOpen));
+    } catch (error) {
+      console.warn('Failed to save sidebar state to localStorage:', error);
     }
   };
-  
-  // Redo function
-  const redo = () => {
-    if (historyIndex < history.length - 1) {
-      const nextState = history[historyIndex + 1];
-      
-      // Check if nextState and its data exist
-      if (!nextState || !nextState.data) {
-        console.warn('[Redo] Invalid next state, skipping redo');
-        return;
-      }
-      
-      const { data } = nextState;
-      
-      // Restore state with fallbacks
-      if (data.thumbnailPositions) setThumbnailPositions(data.thumbnailPositions);
-      if (data.comments) setComments(data.comments);
-      if (data.selectedIds) setSelectedIds(data.selectedIds);
-      if (data.selectedLabelIds) setSelectedLabelIds(data.selectedLabelIds);
-      if (data.lockedThumbnails) setLockedThumbnails(data.lockedThumbnails);
-      if (data.youtubeThumbnails) setYoutubeThumbnails(data.youtubeThumbnails);
-      if (data.drawings) setDrawings(data.drawings);
-      if (data.textLabels) setTextLabels(data.textLabels);
-      if (data.labelPositions) setLabelPositions(data.labelPositions);
-      
-      setHistoryIndex(prev => prev + 1);
-      
-      console.log(`[Redo] Restored to: ${nextState.action}`);
+
+  const handleSidebarWidthChange = (newWidth) => {
+    uiActions.setSidebarWidth(newWidth);
+    try {
+      localStorage.setItem('sidebarWidth', String(newWidth));
+    } catch (error) {
+      console.warn('Failed to save sidebar width to localStorage:', error);
     }
   };
   
   // Update refs when state changes
-  React.useEffect(() => {
-    isDrawingModeRef.current = isDrawingMode;
-  }, [isDrawingMode]);
-
   React.useEffect(() => {
     isAddingCommentRef.current = isAddingComment;
   }, [isAddingComment]);
@@ -317,63 +303,60 @@ const FigmaStyleCanvasRefactored = () => {
     labelSettingsRef.current = labelSettings;
   }, [labelSettings]);
 
-  // Helper to update thumbnail event modes
-  const updateAllThumbnailEventModes = (isDrawingMode) => {
-    if (thumbnailContainersRef.current) {
-      thumbnailContainersRef.current.forEach(container => {
-        if (container.userData && container.userData.id) {
-          updateThumbnailEventMode(container, isDrawingMode);
-        }
-      });
+  // Sync isDrawingMode with ref so CanvasControls can detect drawing mode
+  React.useEffect(() => {
+    isDrawingModeRef.current = isDrawingMode;
+  }, [isDrawingMode]);
+
+  React.useEffect(() => {
+    isHandToolModeRef.current = isHandToolMode;
+  }, [isHandToolMode]);
+
+  // Function moved to before useCanvasToolsIntegrated to avoid temporal dead zone
+
+
+  // Zoom control handlers
+  const handleZoomIn = () => {
+    if (viewportRef.current && viewportTransform.scale < 5) {
+      const newScale = Math.min(viewportTransform.scale * 1.2, 5);
+      const viewport = viewportRef.current;
+      
+      viewport.scale.x = newScale;
+      viewport.scale.y = newScale;
+      
+      uiActions.setViewportTransform({ ...viewportTransform, scale: newScale });
     }
   };
 
-  // Helper to set drawing mode and update thumbnail event modes
-  const setDrawingModeWithUpdate = (value) => {
-    const newValue = typeof value === 'function' ? value(isDrawingModeRef.current) : value;
-    setIsDrawingMode(newValue);
-    updateAllThumbnailEventModes(newValue);
+  const handleZoomOut = () => {
+    if (viewportRef.current && viewportTransform.scale > 0.1) {
+      const newScale = Math.max(viewportTransform.scale / 1.2, 0.1);
+      const viewport = viewportRef.current;
+      
+      viewport.scale.x = newScale;
+      viewport.scale.y = newScale;
+      
+      uiActions.setViewportTransform({ ...viewportTransform, scale: newScale });
+    }
   };
 
-  // Drawing mode toggle functionality
-  const toggleDrawingMode = () => {
-    setIsDrawingMode(prev => {
-      const newDrawingMode = !prev;
+  const handleZoomToFit = () => {
+    if (viewportRef.current && thumbnailContainersRef.current.length > 0) {
+      // Reset to 100% zoom and center the view
+      const viewport = viewportRef.current;
+      viewport.scale.x = 1;
+      viewport.scale.y = 1;
+      viewport.x = 0;
+      viewport.y = 0;
       
-      // Ensure mutual exclusivity with comment mode
-      if (newDrawingMode && isAddingComment) {
-        setIsAddingComment(false);
-        setPendingCommentPos(null);
-      }
-      
-      // Clear current drawing state when toggling off
-      if (!newDrawingMode) {
-        setCurrentDrawing(null);
-        setIsDrawing(false);
-        // Reset cursor
-        if (appRef.current && appRef.current.canvas) {
-          appRef.current.canvas.style.cursor = 'default';
-        }
-      } else {
-        // Set drawing cursor based on eraser mode
-        if (appRef.current && appRef.current.canvas) {
-          appRef.current.canvas.style.cursor = drawingSettingsRef.current.isEraserMode ? 'cell' : 'crosshair';
-        }
-      }
-      
-      // Update all thumbnail event modes based on new drawing mode
-      updateAllThumbnailEventModes(newDrawingMode);
-      
-      return newDrawingMode;
-    });
+      uiActions.setViewportTransform({ x: 0, y: 0, scale: 1 });
+    }
   };
 
   // Clear all drawings functionality
   const clearAllDrawings = () => {
     if (drawings.length > 0) {
-      // Save to history for undo
-      saveToHistory('Clear All Drawings', { drawings: [] });
-      setDrawings([]);
+      canvasActions.clearAllDrawings();
       
       // Clear temporary drawing
       if (tempDrawingGraphicsRef.current) {
@@ -384,13 +367,13 @@ const FigmaStyleCanvasRefactored = () => {
 
   // Handle drawing settings changes from toolbar
   const handleDrawingSettingsChange = React.useCallback((settings) => {
-    setDrawingSettings(settings);
+    canvasActions.updateDrawingSettings(settings);
     
     // Update cursor based on tool
     if (isDrawingMode && appRef.current && appRef.current.canvas) {
       appRef.current.canvas.style.cursor = settings.isEraserMode ? 'cell' : 'crosshair';
     }
-  }, [isDrawingMode]);
+  }, [isDrawingMode, canvasActions]);
   
   // Initialize PixiJS app only once
   useEffect(() => {
@@ -453,7 +436,7 @@ const FigmaStyleCanvasRefactored = () => {
       
       // Initial grid position update
       updateGridPosition(gridSprite, viewport, app);
-      setViewportTransform({
+      uiActions.setViewportTransform({
         x: viewport.x,
         y: viewport.y,
         scale: viewport.scale.x
@@ -486,10 +469,12 @@ const FigmaStyleCanvasRefactored = () => {
       
       // Setup canvas controls
       const cleanup = setupCanvasControls(app, viewport, gridSprite, {
-        onViewportTransform: setViewportTransform,
-        onAddComment: setPendingCommentPos,
+        onViewportTransform: uiActions.setViewportTransform,
+        onAddComment: uiActions.setPendingComment,
         isAddingComment: () => isAddingCommentRef.current,
         isDrawingMode: () => isDrawingModeRef.current,
+        isHandToolMode: () => isHandToolModeRef.current,
+        isSelectionAllowed: () => canvasTools.toolBehavior.canSelect,
         isAddingLabel: () => isAddingLabelRef.current,
         onAddLabel: (pos) => {
           handleLabelCreate(pos);
@@ -508,26 +493,25 @@ const FigmaStyleCanvasRefactored = () => {
             c.selectionOutline.visible = false;
             c.hoverOutline.visible = false;
           });
-          setSelectedIds(new Set());
+          selectionActions.clearSelection();
           // Clear label selection
           textLabelContainersRef.current.forEach(c => {
             c.selected = false;
             c.selectionOutline.visible = false;
             c.hoverBg.visible = false;
           });
-          setSelectedLabelIds(new Set());
         },
         onCanvasClick: () => {
           // Close any open comment when clicking on canvas
-          setEditingComment(null);
+          uiActions.setEditingComment(null);
           // Close label edit dialog
-          setEditingLabel(null);
+          uiActions.setEditingLabel(null);
         },
-        onRectSelectionStart: (startPoint, modifierKeys) => {
+        onRectSelectionStart: () => {
           setIsRectSelecting(true);
           setSelectionRect(null);
         },
-        onRectSelectionMove: (startPoint, currentPoint, modifierKeys) => {
+        onRectSelectionMove: (startPoint, currentPoint) => {
           const rect = createRectFromPoints(startPoint, currentPoint);
           setSelectionRect(rect);
           
@@ -537,7 +521,7 @@ const FigmaStyleCanvasRefactored = () => {
           }
           
           // Update intersecting thumbnails with visual feedback
-          throttledUpdateSelection(rect, modifierKeys);
+          throttledUpdateSelection(rect);
         },
         onRectSelectionEnd: (startPoint, endPoint, modifierKeys) => {
           const rect = createRectFromPoints(startPoint, endPoint);
@@ -604,8 +588,7 @@ const FigmaStyleCanvasRefactored = () => {
             }
             
             // Update selection state and visuals
-            setSelectedIds(newSelectedIds);
-            setSelectedLabelIds(newSelectedLabelIds);
+            selectionActions.setBothSelections(Array.from(newSelectedIds), Array.from(newSelectedLabelIds));
             
             // Update visual state of thumbnails
             thumbnailContainersRef.current.forEach(container => {
@@ -623,16 +606,7 @@ const FigmaStyleCanvasRefactored = () => {
               container.hoverBg.visible = false; // Clear hover state
             });
             
-            // Save to history if selection changed
-            if (newSelectedIds.size !== selectedIds.size || 
-                [...newSelectedIds].some(id => !selectedIds.has(id)) ||
-                newSelectedLabelIds.size !== selectedLabelIds.size ||
-                [...newSelectedLabelIds].some(id => !selectedLabelIds.has(id))) {
-              saveToHistory('Rectangular Selection', { 
-                selectedIds: newSelectedIds,
-                selectedLabelIds: newSelectedLabelIds 
-              });
-            }
+            // Note: History is automatically saved by the reducer for selection changes
           }
           
           // Clear selection rectangle
@@ -654,7 +628,7 @@ const FigmaStyleCanvasRefactored = () => {
             }
           });
         },
-        onDrawingStart: (startPoint, originalEvent) => {
+        onDrawingStart: (startPoint) => {
           // Handle eraser mode - find and remove intersecting drawings
           if (drawingSettingsRef.current.isEraserMode) {
             const eraserRadius = drawingSettingsRef.current.brushSize * 1.5; // Eraser scales with brush size
@@ -669,9 +643,8 @@ const FigmaStyleCanvasRefactored = () => {
             });
             
             if (toRemove.length > 0) {
-              const remainingDrawings = drawingsRef.current.filter(d => !toRemove.includes(d));
-              setDrawings(remainingDrawings);
-              saveToHistory('Erase Drawing', { drawings: remainingDrawings });
+              const toRemoveIds = toRemove.map(d => d.id);
+              canvasActions.deleteDrawings(toRemoveIds);
             }
             return;
           }
@@ -695,7 +668,7 @@ const FigmaStyleCanvasRefactored = () => {
           setCurrentDrawing(newDrawing);
           currentDrawingRef.current = newDrawing;
         },
-        onDrawingMove: (startPoint, currentPoint, originalEvent) => {
+        onDrawingMove: (_, currentPoint) => {
           // Handle eraser mode - continuous erasing
           if (drawingSettingsRef.current.isEraserMode) {
             const eraserRadius = drawingSettingsRef.current.brushSize * 1.5;
@@ -709,8 +682,8 @@ const FigmaStyleCanvasRefactored = () => {
             });
             
             if (toRemove.length > 0) {
-              const remainingDrawings = drawingsRef.current.filter(d => !toRemove.includes(d));
-              setDrawings(remainingDrawings);
+              const toRemoveIds = toRemove.map(d => d.id);
+              canvasActions.deleteDrawings(toRemoveIds);
               // Don't save to history on every move - only on start/end
             }
             return;
@@ -754,11 +727,10 @@ const FigmaStyleCanvasRefactored = () => {
             }
           }
         },
-        onDrawingEnd: (startPoint, endPoint, originalEvent) => {
+        onDrawingEnd: () => {
           // Handle eraser mode end
           if (drawingSettingsRef.current.isEraserMode) {
-            // Eraser operations are already handled in move, just save final state to history
-            saveToHistory('Erase Drawings', { drawings: drawingsRef.current });
+            // Eraser operations are already handled in move and saved to history automatically
             return;
           }
           
@@ -781,11 +753,7 @@ const FigmaStyleCanvasRefactored = () => {
             );
             
             // Add to drawings array
-            const updatedDrawings = [...drawings, drawingData];
-            setDrawings(updatedDrawings);
-            
-            // Save to history for undo/redo
-            saveToHistory('Add Drawing', { drawings: updatedDrawings });
+            canvasActions.addDrawing(drawingData);
             
             // Clear temporary drawing
             if (tempDrawingGraphicsRef.current) {
@@ -799,6 +767,11 @@ const FigmaStyleCanvasRefactored = () => {
           setIsDrawing(false);
         },
         onKeyDown: (e) => {
+          // Do not trigger canvas shortcuts if an input is focused
+          if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
+            return;
+          }
+          
           // Delete selected thumbnails and text labels
           if (e.key === 'Delete' || e.key === 'Backspace') {
             const hasSelectedThumbnails = thumbnailContainersRef.current.some(c => c.selected);
@@ -808,8 +781,7 @@ const FigmaStyleCanvasRefactored = () => {
               // Don't delete if editing a label
               if (editingLabel) return;
               
-              let deletionAction = '';
-              const historyData = {};
+              // Variables no longer needed with centralized state management
               
               // Handle thumbnail deletion
               if (hasSelectedThumbnails) {
@@ -825,11 +797,9 @@ const FigmaStyleCanvasRefactored = () => {
                 });
                 
                 // Update state
-                const updatedThumbnails = youtubeThumbnails.filter(t => !deletedIds.includes(t.id));
-                setYoutubeThumbnails(updatedThumbnails);
-                setSelectedIds(new Set());
-                historyData.youtubeThumbnails = updatedThumbnails;
-                deletionAction = hasSelectedLabels ? 'Delete Thumbnails & Labels' : 'Delete Thumbnails';
+                canvasActions.deleteThumbnails(deletedIds);
+                selectionActions.clearSelection();
+                // deletionAction tracking no longer needed with centralized state
               }
               
               // Handle text label deletion
@@ -846,26 +816,13 @@ const FigmaStyleCanvasRefactored = () => {
                 });
                 
                 // Update state
-                const updatedLabels = textLabels.filter(l => !deletedLabelIds.includes(l.id));
-                setTextLabels(updatedLabels);
-                setSelectedLabelIds(new Set());
-                historyData.textLabels = updatedLabels;
+                canvasActions.deleteLabels(deletedLabelIds);
+                selectionActions.clearSelection();
                 
-                // Remove deleted labels from positions
-                const updatedLabelPositions = { ...labelPositions };
-                deletedLabelIds.forEach(id => delete updatedLabelPositions[id]);
-                setLabelPositions(updatedLabelPositions);
-                historyData.labelPositions = updatedLabelPositions;
-                
-                if (!hasSelectedThumbnails) {
-                  deletionAction = 'Delete Labels';
-                }
+                // deletionAction tracking no longer needed with centralized state
               }
               
-              // Save to history
-              if (deletionAction) {
-                saveToHistory(deletionAction, historyData);
-              }
+              // History is automatically saved by the reducer for deletion actions
             }
           }
           
@@ -879,7 +836,6 @@ const FigmaStyleCanvasRefactored = () => {
               c.selectionOutline.visible = true;
             });
             const allIds = thumbnailContainersRef.current.map(c => c.userData.id);
-            setSelectedIds(new Set(allIds));
             
             // Select all text labels
             textLabelContainersRef.current.forEach(c => {
@@ -887,7 +843,7 @@ const FigmaStyleCanvasRefactored = () => {
               c.selectionOutline.visible = true;
             });
             const allLabelIds = textLabelContainersRef.current.map(c => c.labelData.id);
-            setSelectedLabelIds(new Set(allLabelIds));
+            selectionActions.setBothSelections(allIds, allLabelIds);
           }
           
           // Deselect all
@@ -897,64 +853,59 @@ const FigmaStyleCanvasRefactored = () => {
               c.selected = false;
               c.selectionOutline.visible = false;
             });
-            setSelectedIds(new Set());
-            
             // Deselect text labels
             textLabelContainersRef.current.forEach(c => {
               c.selected = false;
               c.selectionOutline.visible = false;
               c.hoverBg.visible = false;
             });
-            setSelectedLabelIds(new Set());
+            selectionActions.clearSelection();
             
             // Exit special modes
-            setIsAddingComment(false);
-            setPendingCommentPos(null);
-            setEditingComment(null);
-            setEditingLabel(null);
+            if (isAddingComment) toolActions.selectSelectionTool();
+            uiActions.setPendingComment(null);
+            uiActions.setEditingComment(null);
+            uiActions.setEditingLabel(null);
           }
           
           // Comment mode shortcut
           if (e.key === 'c' && !e.metaKey && !e.ctrlKey) {
-            setIsAddingComment(prev => {
-              const newCommentMode = !prev;
-              
-              // Ensure mutual exclusivity with drawing mode
-              if (newCommentMode && isDrawingModeRef.current) {
-                setDrawingModeWithUpdate(false);
-                setCurrentDrawing(null);
-                setIsDrawing(false);
-              }
-              
-              return newCommentMode;
-            });
+            toolActions.toggleCommentMode();
           }
           
           // Drawing mode shortcut
           if (e.key === 'p' && !e.metaKey && !e.ctrlKey) {
-            toggleDrawingMode();
+            toolActions.toggleDrawingMode();
           }
           
           // Label mode shortcut
           if (e.key === 't' && !e.metaKey && !e.ctrlKey) {
-            setIsAddingLabel(prev => {
-              const newLabelMode = !prev;
-              
-              // Ensure mutual exclusivity with other modes
-              if (newLabelMode) {
-                if (isDrawingModeRef.current) {
-                  setDrawingModeWithUpdate(false);
-                  setCurrentDrawing(null);
-                  setIsDrawing(false);
-                }
-                if (isAddingCommentRef.current) {
-                  setIsAddingComment(false);
-                  setPendingCommentPos(null);
-                }
-              }
-              
-              return newLabelMode;
-            });
+            toolActions.toggleLabelMode();
+          }
+          
+          // Selection tool (V) - always ensure selection mode
+          if (e.key === 'v' && !e.metaKey && !e.ctrlKey) {
+            toolActions.toggleHandTool(false);
+          }
+          
+          // Hand tool mode (H) - always ensure hand tool mode
+          if (e.key === 'h' && !e.metaKey && !e.ctrlKey) {
+            toolActions.toggleHandTool(true);
+          }
+          
+          // Zoom in (+)
+          if ((e.key === '=' || e.key === '+') && !e.metaKey && !e.ctrlKey) {
+            handleZoomIn();
+          }
+          
+          // Zoom out (-)
+          if (e.key === '-' && !e.metaKey && !e.ctrlKey) {
+            handleZoomOut();
+          }
+          
+          // Zoom to fit (0)
+          if (e.key === '0' && !e.metaKey && !e.ctrlKey) {
+            handleZoomToFit();
           }
           
           // Undo (Cmd+Z / Ctrl+Z)
@@ -997,7 +948,7 @@ const FigmaStyleCanvasRefactored = () => {
         }
       }
     };
-  }, [isMultiplayerEnabled]); // Re-run when multiplayer is toggled
+  }, [isMultiplayerEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Multiplayer connection management
   useEffect(() => {
@@ -1125,363 +1076,37 @@ const FigmaStyleCanvasRefactored = () => {
     setIsMultiplayerEnabled(prev => !prev);
   };
   
-  // Update thumbnails when they change
-  useEffect(() => {
-    if (!appRef.current || !viewportRef.current) return;
-    
-    const viewport = viewportRef.current;
-    const app = appRef.current;
-    
-    // Clear existing thumbnails and cleanup intervals
-    thumbnailContainersRef.current.forEach(container => {
-      if (container._cleanupInterval) {
-        container._cleanupInterval();
-      }
-      viewport.removeChild(container);
-    });
-    thumbnailContainersRef.current = [];
-    
-    // Create new thumbnails
-    for (const thumb of thumbnails) {
-      const container = createThumbnailContainer(thumb, selectedIds, lockedThumbnails.has(thumb.id));
-      
-      // Use saved position if available, otherwise use default
-      const savedPos = thumbnailPositions[thumb.id];
-      container.x = savedPos ? savedPos.x : thumb.x;
-      container.y = savedPos ? savedPos.y : thumb.y;
-      
-      // Setup interactions
-      setupThumbnailInteractions(container, {
-        isDrawingMode: () => isDrawingModeRef.current,
-        onSelect: (selectedContainer, e) => {
-          // Allow selection of all thumbnails (including locked ones)
-          
-          const event = e.originalEvent || e;
-          if (event.shiftKey || event.metaKey) {
-            // Multi-select
-            selectedContainer.selected = !selectedContainer.selected;
-            if (selectedContainer.selected) {
-              setSelectedIds(prev => new Set([...prev, selectedContainer.userData.id]));
-            } else {
-              setSelectedIds(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(selectedContainer.userData.id);
-                return newSet;
-              });
-            }
-          } else if (!selectedContainer.selected) {
-            // Single select
-            thumbnailContainersRef.current.forEach(c => {
-              c.selected = false;
-              c.selectionOutline.visible = false;
-              c.hoverOutline.visible = false;
-            });
-            selectedContainer.selected = true;
-            setSelectedIds(new Set([selectedContainer.userData.id]));
-          }
-          
-          // Update visuals
-          selectedContainer.selectionOutline.visible = selectedContainer.selected;
-          selectedContainer.hoverOutline.visible = false;
-        },
-        onDragStart: (dragContainer, e) => {
-          // Allow dragging of all thumbnails (including locked ones)
-          
-          const selectedContainers = thumbnailContainersRef.current.filter(c => c.selected);
-          if (dragContainer.selected) {
-            const dragData = {
-              containers: selectedContainers,
-              startPositions: selectedContainers.map(c => ({ x: c.x, y: c.y })),
-              mouseStart: viewport.toLocal(e.global),
-            };
-            
-            // Bring to front
-            selectedContainers.forEach(c => {
-              viewport.removeChild(c);
-              viewport.addChild(c);
-            });
-            
-            app.canvas.style.cursor = 'move';
-            
-            return dragData;
-          }
-          return null;
-        },
-        onDragMove: (container, e, dragData) => {
-          const currentMouse = viewport.toLocal(e.global);
-          const dx = currentMouse.x - dragData.mouseStart.x;
-          const dy = currentMouse.y - dragData.mouseStart.y;
-          
-          dragData.containers.forEach((c, i) => {
-            c.x = dragData.startPositions[i].x + dx;
-            c.y = dragData.startPositions[i].y + dy;
-          });
-          
-          // Update grid position
-          updateGridPosition(gridGraphicsRef.current, viewport, app);
-        },
-        onDragEnd: (container, dragData) => {
-          // Save final positions
-          const newPositions = {};
-          dragData.containers.forEach(c => {
-            newPositions[c.userData.id] = { x: c.x, y: c.y };
-          });
-          setThumbnailPositions(prev => {
-            const updated = { ...prev, ...newPositions };
-            
-            // Save to history for undo/redo
-            saveToHistory('Move Thumbnails', { thumbnailPositions: updated });
-            
-            return updated;
-          });
-          app.canvas.style.cursor = 'default';
-        }
-      });
-      
-      // Insert thumbnail before drawing containers to ensure drawings stay on top
-      const drawingSystem = drawingSystemRef.current;
-      if (drawingSystem && drawingSystem.foregroundDrawingsContainer.parent === viewport) {
-        const foregroundIndex = viewport.children.indexOf(drawingSystem.foregroundDrawingsContainer);
-        viewport.addChildAt(container, foregroundIndex);
-      } else {
-        viewport.addChild(container);
-      }
-      thumbnailContainersRef.current.push(container);
-    }
-  }, [thumbnails, selectedIds, thumbnailPositions, lockedThumbnails]);
-  
-  // Track existing drawing graphics to avoid re-rendering everything
-  const drawingGraphicsMapRef = useRef(new Map()); // Map drawing ID to graphics object
-  
-  // Update drawings when they change - only add/remove changed drawings
-  useEffect(() => {
-    if (!drawingSystemRef.current) return;
-    
-    const drawingSystem = drawingSystemRef.current;
-    const existingGraphics = drawingGraphicsMapRef.current;
-    
-    // Get current drawing IDs
-    const currentDrawingIds = new Set(drawings.map(d => d.id));
-    
-    // Remove drawings that no longer exist
-    for (const [drawingId, graphics] of existingGraphics.entries()) {
-      if (!currentDrawingIds.has(drawingId)) {
-        // Remove from container and destroy
-        if (graphics.parent) {
-          graphics.parent.removeChild(graphics);
-        }
-        graphics.destroy();
-        existingGraphics.delete(drawingId);
-      }
-    }
-    
-    // Add new drawings that don't exist yet
-    for (const drawing of drawings) {
-      if (!existingGraphics.has(drawing.id)) {
-        const graphics = createDrawingGraphics(drawing);
-        
-        // Render based on drawing type
-        switch (drawing.type) {
-          case 'freehand':
-            renderFreehandStroke(graphics, drawing.points, drawing.style);
-            break;
-          case 'line':
-            if (drawing.points.length >= 2) {
-              renderLine(graphics, drawing.points[0], drawing.points[drawing.points.length - 1], drawing.style);
-            }
-            break;
-          case 'rectangle':
-            if (drawing.points.length >= 2) {
-              renderRectangle(graphics, drawing.points[0], drawing.points[drawing.points.length - 1], drawing.style);
-            }
-            break;
-          default:
-            renderFreehandStroke(graphics, drawing.points, drawing.style);
-        }
-        
-        // Add to appropriate layer
-        addDrawingToLayer(drawingSystem, graphics, drawing.layer);
-        
-        // Track this graphics object
-        existingGraphics.set(drawing.id, graphics);
-      }
-    }
-    
-    // Ensure temporary drawing graphics is still in the container
-    if (tempDrawingGraphicsRef.current && 
-        !drawingSystem.foregroundDrawingsContainer.children.includes(tempDrawingGraphicsRef.current)) {
-      drawingSystem.foregroundDrawingsContainer.addChild(tempDrawingGraphicsRef.current);
-    }
-  }, [drawings]);
-  
-  // Update text labels when they change
-  useEffect(() => {
-    if (!appRef.current || !viewportRef.current) return;
-    
-    const viewport = viewportRef.current;
-    const app = appRef.current;
-    
-    // Clear existing labels
-    textLabelContainersRef.current.forEach(container => {
-      viewport.removeChild(container);
-    });
-    textLabelContainersRef.current = [];
-    
-    // Create new labels
-    for (const label of textLabels) {
-      const container = createTextLabelContainer(label);
-      
-      // Use saved position if available
-      const savedPos = labelPositions[label.id];
-      container.x = savedPos ? savedPos.x : label.x;
-      container.y = savedPos ? savedPos.y : label.y;
-      
-      // Setup interactions
-      setupTextLabelInteractions(container, {
-        onSelect: (selectedContainer, e) => {
-          const event = e.originalEvent || e;
-          if (event.shiftKey || event.metaKey) {
-            // Multi-select
-            selectedContainer.selected = !selectedContainer.selected;
-            if (selectedContainer.selected) {
-              setSelectedLabelIds(prev => new Set([...prev, selectedContainer.labelData.id]));
-            } else {
-              setSelectedLabelIds(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(selectedContainer.labelData.id);
-                return newSet;
-              });
-            }
-          } else if (!selectedContainer.selected) {
-            // Single select
-            textLabelContainersRef.current.forEach(c => {
-              c.selected = false;
-              c.selectionOutline.visible = false;
-              c.hoverBg.visible = false;
-            });
-            selectedContainer.selected = true;
-            setSelectedLabelIds(new Set([selectedContainer.labelData.id]));
-          }
-          
-          // Update visuals
-          selectedContainer.selectionOutline.visible = selectedContainer.selected;
-          selectedContainer.hoverBg.visible = false;
-        },
-        onDragStart: (dragContainer, e) => {
-          // If the container isn't selected yet, select it first
-          if (!dragContainer.selected) {
-            textLabelContainersRef.current.forEach(c => {
-              c.selected = false;
-              c.selectionOutline.visible = false;
-              c.hoverBg.visible = false;
-            });
-            dragContainer.selected = true;
-            dragContainer.selectionOutline.visible = true;
-            setSelectedLabelIds(new Set([dragContainer.labelData.id]));
-          }
-          
-          const selectedContainers = textLabelContainersRef.current.filter(c => c.selected);
-          const dragData = {
-            containers: selectedContainers,
-            startPositions: selectedContainers.map(c => ({ x: c.x, y: c.y })),
-            mouseStart: viewport.toLocal(e.global),
-          };
-          
-          // Bring to front
-          selectedContainers.forEach(c => {
-            viewport.removeChild(c);
-            viewport.addChild(c);
-          });
-          
-          app.canvas.style.cursor = 'move';
-          
-          return dragData;
-        },
-        onDragMove: (container, e, dragData) => {
-          const currentMouse = viewport.toLocal(e.global);
-          const dx = currentMouse.x - dragData.mouseStart.x;
-          const dy = currentMouse.y - dragData.mouseStart.y;
-          
-          dragData.containers.forEach((c, i) => {
-            c.x = dragData.startPositions[i].x + dx;
-            c.y = dragData.startPositions[i].y + dy;
-          });
-        },
-        onDragEnd: (container, dragData) => {
-          // Save final positions
-          const newPositions = {};
-          dragData.containers.forEach(c => {
-            newPositions[c.labelData.id] = { x: c.x, y: c.y };
-          });
-          setLabelPositions(prev => {
-            const updated = { ...prev, ...newPositions };
-            
-            // Save to history for undo/redo
-            saveToHistory('Move Labels', { labelPositions: updated });
-            
-            return updated;
-          });
-          app.canvas.style.cursor = 'default';
-        },
-        onDoubleClick: (container) => {
-          setEditingLabel(container.labelData);
-        }
-      });
-      
-      // Add label to viewport
-      viewport.addChild(container);
-      textLabelContainersRef.current.push(container);
-    }
-  }, [textLabels]);
+  // Update selected label text when selection changes - now handled by reducer automatically
+  // This useEffect is no longer needed as selectedLabelText is managed by the reducer
   
   const selectedThumbnails = thumbnails.filter(t => selectedIds.has(t.id));
   
   // Handle comment submission
   const handleCommentSubmit = (text) => {
     if (pendingCommentPos && text.trim()) {
-      const newComment = {
-        id: Date.now(),
-        x: pendingCommentPos.x,
-        y: pendingCommentPos.y,
-        text: text,
-        author: 'Current User',
-        timestamp: new Date().toISOString(),
-        resolved: false
-      };
-      const updatedComments = [...comments, newComment];
-      setComments(updatedComments);
-      
-      // Save to history for undo/redo
-      saveToHistory('Add Comment', { comments: updatedComments });
+      canvasActions.addComment(pendingCommentPos, text);
     }
-    setPendingCommentPos(null);
+    uiActions.setPendingComment(null);
   };
   
   // Handle label creation
   const handleLabelCreate = (pos) => {
-    const newLabel = createLabelData('New Section', pos.x, pos.y, labelSettings);
-    const updatedLabels = [...textLabels, newLabel];
-    setTextLabels(updatedLabels);
-    
-    // Save to history
-    saveToHistory('Add Label', { textLabels: updatedLabels });
+    const newLabel = canvasActions.addLabel('New Section', pos, labelSettings);
     
     // Immediately edit the new label
-    setEditingLabel(newLabel);
-    setIsAddingLabel(false);
+    uiActions.setEditingLabel(newLabel);
+    if (isAddingLabel) toolActions.selectSelectionTool();
   };
 
   // Handle applying settings to selected labels
   const handleApplySettingsToSelected = (newSettings) => {
     if (selectedLabelIds.size === 0) return;
 
-    // Update the label data
-    const updatedLabels = textLabels.map(label => 
-      selectedLabelIds.has(label.id) 
-        ? { ...label, style: { ...label.style, ...newSettings } }
-        : label
-    );
-    setTextLabels(updatedLabels);
+    // Update the label data using actions
+    const selectedIds = Array.from(selectedLabelIds);
+    selectedIds.forEach(id => {
+      canvasActions.updateLabel(id, { style: newSettings });
+    });
 
     // Also update the visual containers immediately
     textLabelContainersRef.current.forEach(container => {
@@ -1490,8 +1115,7 @@ const FigmaStyleCanvasRefactored = () => {
       }
     });
 
-    // Save to history
-    saveToHistory('Update Label Style', { textLabels: updatedLabels });
+    // History is automatically saved by the reducer for label updates
   };
   
   // Handle global mouse events for comment dragging
@@ -1506,20 +1130,14 @@ const FigmaStyleCanvasRefactored = () => {
       const newX = (e.clientX - rect.left - dragOffset.x - viewportTransform.x) / viewportTransform.scale;
       const newY = (e.clientY - rect.top - dragOffset.y - viewportTransform.y) / viewportTransform.scale;
       
-      setComments(prevComments => 
-        prevComments.map(c => 
-          c.id === draggedComment ? { ...c, x: newX, y: newY } : c
-        )
-      );
+      canvasActions.updateComment(draggedComment, { x: newX, y: newY });
     };
 
     const handleMouseUp = () => {
       if (draggedComment) {
-        // Save to history for undo/redo after comment drag
-        saveToHistory('Move Comment', { comments });
+        // History is automatically saved by the reducer for comment updates
       }
-      setDraggedComment(null);
-      setDragOffset({ x: 0, y: 0 });
+      uiActions.setDraggedComment(null, { x: 0, y: 0 });
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -1529,7 +1147,7 @@ const FigmaStyleCanvasRefactored = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggedComment, dragOffset, viewportTransform]);
+  }, [draggedComment, dragOffset, viewportTransform, comments, canvasActions, uiActions]);
 
   // Handle click outside for AI Art-Director sidebar
   useEffect(() => {
@@ -1542,7 +1160,7 @@ const FigmaStyleCanvasRefactored = () => {
         // Also check if the click is not on a ThumbnailActions button
         const isActionButton = event.target.closest('.thumbnail-actions-button');
         if (!isActionButton) {
-          setSelectedCritique(null);
+          uiActions.setSelectedCritique(null);
         }
       }
     };
@@ -1556,14 +1174,79 @@ const FigmaStyleCanvasRefactored = () => {
       clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [selectedCritique]);
+  }, [selectedCritique, uiActions]);
 
   return (
     <div className={`relative w-full h-screen overflow-hidden bg-neutral-5 ${draggedComment ? 'no-select' : ''}`}>
+      {/* Top Toolbar */}
+      <TopToolbar
+        // Comment props
+        isAddingComment={isAddingComment}
+        onToggleAddComment={() => toolActions.toggleCommentMode()}
+        commentCount={comments.length}
+        
+        // Drawing props
+        isDrawingMode={isDrawingMode}
+        onToggleDrawingMode={() => toolActions.toggleDrawingMode()}
+        drawingCount={drawings.length}
+        
+        // Label props
+        isAddingLabel={isAddingLabel}
+        onToggleAddLabel={() => toolActions.toggleLabelMode()}
+        labelCount={textLabels.length}
+        
+        // Multiplayer props
+        isMultiplayerConnected={isMultiplayerConnected}
+        multiplayerUserCount={multiplayerUserCount}
+        currentMultiplayerUser={currentMultiplayerUser}
+        remoteCursors={remoteCursors}
+        onToggleMultiplayer={toggleMultiplayer}
+        isMultiplayerEnabled={isMultiplayerEnabled}
+        
+        // History props - now using centralized state
+        canUndo={state.history.past.length > 0}
+        canRedo={state.history.future.length > 0}
+        onUndo={undo}
+        onRedo={redo}
+        lastAction={state.history.present?.action}
+        nextAction={state.history.future[0]?.action}
+        
+        // Sidebar props
+        sidebarOpen={sidebarOpen}
+        sidebarWidth={sidebarWidth}
+        showContentImportSidebar={showContentImportSidebar}
+      />
+      
+      {/* Main Sidebar */}
+      <MainSidebar
+        isOpen={sidebarOpen}
+        onToggle={handleSidebarToggle}
+        width={sidebarWidth}
+        onWidthChange={handleSidebarWidthChange}
+        minWidth={200}
+        maxWidth={400}
+        onAddContent={() => uiActions.setShowContentImport(true)}
+      />
+      
       <div 
         ref={containerRef} 
-        className="absolute inset-0" 
-        style={{ backgroundColor: '#f5f5f5' }}
+        className="absolute inset-0 pt-16" 
+        style={{ 
+          backgroundColor: '#f5f5f5',
+          left: `${(sidebarOpen ? sidebarWidth : 60) + (showContentImportSidebar ? 380 : 0)}px`,
+          transition: 'left 300ms ease-out'
+        }}
+      />
+      
+      {/* Canvas Viewport Controls */}
+      <CanvasViewportControlsRefactored
+        activeTool={activeTool}
+        isSpacePanning={isSpacePanning}
+        toolActions={toolActions}
+        zoomLevel={zoomActions.zoomLevel}
+        zoomActions={zoomActions}
+        minZoom={10}
+        maxZoom={500}
       />
       
       {/* Remote Cursors Layer */}
@@ -1574,29 +1257,7 @@ const FigmaStyleCanvasRefactored = () => {
         />
       )}
       
-      {/* Multiplayer Status Indicator */}
-      <div className="absolute top-4 right-4 z-20">
-        <MultiplayerStatus
-          isConnected={isMultiplayerConnected}
-          userCount={multiplayerUserCount}
-          currentUser={currentMultiplayerUser}
-          onToggle={toggleMultiplayer}
-          isEnabled={isMultiplayerEnabled}
-        />
-      </div>
       
-      {/* Welcome Sidebar Toggle Button - show only when sidebar is closed */}
-      {!showWelcomeSidebar && (
-        <button
-          onClick={() => setShowWelcomeSidebar(true)}
-          className="absolute top-4 left-4 z-10 bg-background-primary border border-border-divider rounded-lg p-2 hover:bg-background-secondary shadow-sm transition-colors"
-          title="Open import sidebar"
-        >
-          <svg className="w-5 h-5 text-background-brand" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-          </svg>
-        </button>
-      )}
 
       {/* Advanced Import disabled for minimal UI */}
       {/* 
@@ -1615,91 +1276,10 @@ const FigmaStyleCanvasRefactored = () => {
       
 
       
-      {isAddingComment && (
-        <CommentModeIndicator onClose={() => setIsAddingComment(false)} />
-      )}
-      
-      {isDrawingMode && (
-        <DrawingModeIndicator onClose={() => setDrawingModeWithUpdate(false)} />
-      )}
       
       
-      <UnifiedToolbar 
-        // Comment props
-        isAddingComment={isAddingComment}
-        onToggleAddComment={() => setIsAddingComment(prev => {
-          const newCommentMode = !prev;
-          
-          // Ensure mutual exclusivity with drawing mode
-          if (newCommentMode && isDrawingModeRef.current) {
-            setDrawingModeWithUpdate(false);
-            setCurrentDrawing(null);
-            setIsDrawing(false);
-          }
-          
-          return newCommentMode;
-        })}
-        commentCount={comments.length}
-        
-        // Drawing props
-        isDrawingMode={isDrawingMode}
-        onToggleDrawingMode={toggleDrawingMode}
-        drawingCount={drawings.length}
-        onClearAllDrawings={clearAllDrawings}
-        onDrawingSettingsChange={handleDrawingSettingsChange}
-        
-        // Label props
-        isAddingLabel={isAddingLabel}
-        onToggleAddLabel={() => setIsAddingLabel(prev => {
-          const newLabelMode = !prev;
-          
-          // Ensure mutual exclusivity with other modes
-          if (newLabelMode) {
-            if (isDrawingModeRef.current) {
-              setDrawingModeWithUpdate(false);
-              setCurrentDrawing(null);
-              setIsDrawing(false);
-            }
-            if (isAddingCommentRef.current) {
-              setIsAddingComment(false);
-              setPendingCommentPos(null);
-            }
-          }
-          
-          return newLabelMode;
-        })}
-        labelCount={textLabels.length}
-        onLabelSettingsChange={setLabelSettings}
-        currentSettings={labelSettings}
-        selectedLabelIds={selectedLabelIds}
-        onApplySettingsToSelected={handleApplySettingsToSelected}
-      />
       
-      {/* Undo/Redo Controls */}
-      {hasImportedBefore && (
-        <div className="absolute top-4 right-4 z-10 flex gap-2">
-          <button
-            onClick={undo}
-            disabled={historyIndex <= 0}
-            className="bg-background-primary border border-border-divider rounded-md p-2 hover:bg-background-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title={`Undo${history[historyIndex] ? ` (${history[historyIndex].action})` : ''}`}
-          >
-            <svg className="w-4 h-4 text-text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-            </svg>
-          </button>
-          <button
-            onClick={redo}
-            disabled={historyIndex >= history.length - 1}
-            className="bg-background-primary border border-border-divider rounded-md p-2 hover:bg-background-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title={`Redo${history[historyIndex + 1] ? ` (${history[historyIndex + 1].action})` : ''}`}
-          >
-            <svg className="w-4 h-4 text-text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10h-10a8 8 0 00-8 8v2m18-10l-6 6m6-6l-6-6" />
-            </svg>
-          </button>
-        </div>
-      )}
+      
       
       {/* Thumbnail action buttons for selected thumbnails */}
       {selectedThumbnails.map(thumb => {
@@ -1716,28 +1296,13 @@ const FigmaStyleCanvasRefactored = () => {
             position={position}
             viewportTransform={viewportTransform}
             isLocked={lockedThumbnails.has(thumb.id)}
-            onInfoClick={() => setShowAnalytics(true)}
+            onInfoClick={() => uiActions.setShowAnalytics(true)}
             onCritiqueClick={() => {
-              setSelectedCritique(thumb);
-              setShowAnalytics(false); // Close analytics if open
+              uiActions.setSelectedCritique(thumb);
+              uiActions.setShowAnalytics(false); // Close analytics if open
             }}
             onToggleVisibility={() => {
-              setLockedThumbnails(prev => {
-                const newSet = new Set(prev);
-                const wasLocked = newSet.has(thumb.id);
-                if (wasLocked) {
-                  newSet.delete(thumb.id);
-                } else {
-                  newSet.add(thumb.id);
-                }
-                
-                // Save to history for undo/redo
-                saveToHistory(wasLocked ? 'Restore Thumbnail Visibility' : 'Reduce Thumbnail Visibility', { 
-                  lockedThumbnails: newSet 
-                });
-                
-                return newSet;
-              });
+              canvasActions.toggleThumbnailLock(thumb.id);
             }}
           />
         );
@@ -1756,32 +1321,19 @@ const FigmaStyleCanvasRefactored = () => {
             if (!e.target.closest('.comment-pin')) return;
             e.preventDefault();
             e.stopPropagation();
-            setDraggedComment(comment.id);
-            setDragOffset({
+            uiActions.setDraggedComment(comment.id, {
               x: 16 * Math.min(1, 1 / viewportTransform.scale),
               y: 16 * Math.min(1, 1 / viewportTransform.scale)
             });
           }}
-          onEditClick={() => setEditingComment(comment.id)}
+          onEditClick={() => uiActions.setEditingComment(comment.id)}
           onResolveToggle={() => {
-            const updatedComments = comments.map(c => 
-              c.id === comment.id ? { ...c, resolved: !c.resolved } : c
-            );
-            setComments(updatedComments);
-            
-            // Save to history for undo/redo
-            saveToHistory(comment.resolved ? 'Unresolve Comment' : 'Resolve Comment', { 
-              comments: updatedComments 
-            });
+            canvasActions.resolveComment(comment.id);
           }}
           onDelete={() => {
-            const updatedComments = comments.filter(c => c.id !== comment.id);
-            setComments(updatedComments);
-            
-            // Save to history for undo/redo
-            saveToHistory('Delete Comment', { comments: updatedComments });
+            canvasActions.deleteComment(comment.id);
           }}
-          onClose={() => setEditingComment(null)}
+          onClose={() => uiActions.setEditingComment(null)}
         />
       ))}
       
@@ -1791,7 +1343,7 @@ const FigmaStyleCanvasRefactored = () => {
           position={pendingCommentPos}
           viewportTransform={viewportTransform}
           onSubmit={handleCommentSubmit}
-          onCancel={() => setPendingCommentPos(null)}
+          onCancel={() => uiActions.setPendingComment(null)}
         />
       )}
       
@@ -1799,14 +1351,14 @@ const FigmaStyleCanvasRefactored = () => {
       {selectedThumbnails.length === 1 && (
         <SidebarAnalytics 
           thumbnail={selectedThumbnails[0]} 
-          onClose={() => setShowAnalytics(false)}
+          onClose={() => uiActions.setShowAnalytics(false)}
           isOpen={showAnalytics}
         />
       )}
 
       <SidebarArtDirector
         thumbnail={selectedCritique}
-        onClose={() => setSelectedCritique(null)}
+        onClose={() => uiActions.setSelectedCritique(null)}
         isOpen={!!selectedCritique}
       />
       
@@ -1814,156 +1366,87 @@ const FigmaStyleCanvasRefactored = () => {
         <SelectionIndicator count={selectedThumbnails.length} />
       )}
       
-      {/* Welcome Sidebar */}
-      <WelcomeSidebar 
-        isOpen={showWelcomeSidebar}
+
+      {/* Tool Settings Panel */}
+      <ToolSettingsPanel
+        activeTool={
+          isAddingComment ? 'comment' :
+          isDrawingMode ? 'drawing' :
+          isAddingLabel ? 'label' :
+          null
+        }
+        // Comment props
+        commentCount={comments.length}
+        
+        // Drawing props
+        drawingCount={drawings.length}
+        onClearAllDrawings={clearAllDrawings}
+        onDrawingSettingsChange={handleDrawingSettingsChange}
+        
+        // Label props
+        labelCount={textLabels.length}
+        onLabelSettingsChange={canvasActions.updateLabelSettings}
+        currentSettings={labelSettings}
+        selectedLabelIds={selectedLabelIds}
+        onApplySettingsToSelected={handleApplySettingsToSelected}
+        selectedLabelText={selectedLabelText}
+        onLabelTextChange={(newText) => {
+          if (selectedLabelIds.size === 1) {
+            const selectedId = [...selectedLabelIds][0];
+            canvasActions.updateLabel(selectedId, { text: newText });
+          }
+        }}
         onClose={() => {
-          setShowWelcomeSidebar(false);
-          // Mark that user has seen welcome
-          try {
-            localStorage.setItem('hasSeenWelcome', 'true');
-            setHasSeenWelcome(true);
-          } catch (error) {
-            console.warn('Could not save welcome status to localStorage:', error);
-          }
-        }}
-        onVideosImported={(videos, channelInfo) => {
-          console.log('[WelcomeSidebar] Videos imported:', videos);
-          console.log('[WelcomeSidebar] Number of videos imported:', videos.length);
-          
-          if (videos.length > 0) {
-            console.log('[WelcomeSidebar] First video details:', {
-              id: videos[0].id,
-              title: videos[0].title,
-              thumbnail: videos[0].thumbnail,
-              thumbnails: videos[0].thumbnails
-            });
-          }
-          
-          // Arrange videos in a grid with proper spacing
-          const arrangedVideos = videos.map((video, index) => {
-            const col = index % 5;
-            const row = Math.floor(index / 5);
-            const arrangedVideo = {
-              ...video,
-              x: 100 + col * 380,
-              y: 100 + row * 300
-            };
-            console.log(`[WelcomeSidebar] Arranged video ${index}:`, {
-              id: arrangedVideo.id,
-              title: arrangedVideo.title,
-              thumbnail: arrangedVideo.thumbnail,
-              position: { x: arrangedVideo.x, y: arrangedVideo.y }
-            });
-            return arrangedVideo;
-          });
-          
-          console.log('[WelcomeSidebar] Setting YouTube thumbnails:', arrangedVideos);
-          setYoutubeThumbnails(arrangedVideos);
-          
-          // Save initial import to history
-          saveToHistory('Import Videos from Welcome', { youtubeThumbnails: arrangedVideos });
-          
-          // Mark that user has imported videos for future visits
-          try {
-            localStorage.setItem('hasImportedVideos', 'true');
-            setHasImportedBefore(true);
-          } catch (error) {
-            console.warn('Could not save import status to localStorage:', error);
-          }
-        }}
-        onCreateChannelHeader={(channelName) => {
-          // Create a section header above the imported videos
-          const headerLabel = createLabelData(
-            channelName,
-            100, // Same X as first video
-            -20, // Much higher above the first row of videos (videos start at y:100, giving 120px space)
-            {
-              ...labelSettings,
-              size: 'XL' // Use extra large for channel headers
-            }
-          );
-          
-          const updatedLabels = [...textLabels, headerLabel];
-          setTextLabels(updatedLabels);
-          
-          // Save to history
-          saveToHistory('Add Channel Header from Welcome', { textLabels: updatedLabels });
+          if (isAddingComment) toolActions.selectSelectionTool();
+          toolActions.selectSelectionTool();
+          if (isAddingLabel) toolActions.selectSelectionTool();
         }}
       />
-
-      {/* YouTube Importer Modal */}
       {showYouTubeImporter && (
         <YouTubeImporter
-          onClose={() => setShowYouTubeImporter(false)}
-          onVideosImported={(videos, channelInfo) => {
-            console.log('[FigmaStyleCanvas] Videos imported from YouTube:', videos);
-            console.log('[FigmaStyleCanvas] Number of videos imported:', videos.length);
-            
-            if (videos.length > 0) {
-              console.log('[FigmaStyleCanvas] First video details:', {
-                id: videos[0].id,
-                title: videos[0].title,
-                thumbnail: videos[0].thumbnail,
-                thumbnails: videos[0].thumbnails
-              });
-            }
-            
-            // Arrange videos in a grid with proper spacing
-            const arrangedVideos = videos.map((video, index) => {
-              const col = index % 5;
-              const row = Math.floor(index / 5);
-              const arrangedVideo = {
-                ...video,
-                x: 100 + col * 380,
-                y: 100 + row * 300
-              };
-              console.log(`[FigmaStyleCanvas] Arranged video ${index}:`, {
-                id: arrangedVideo.id,
-                title: arrangedVideo.title,
-                thumbnail: arrangedVideo.thumbnail,
-                position: { x: arrangedVideo.x, y: arrangedVideo.y }
-              });
-              return arrangedVideo;
-            });
-            
-            console.log('[FigmaStyleCanvas] Setting YouTube thumbnails:', arrangedVideos);
-            setYoutubeThumbnails(arrangedVideos);
-            
-            // Save initial import to history
-            saveToHistory('Import Videos', { youtubeThumbnails: arrangedVideos });
-            
-            // Mark that user has imported videos for future visits
-            try {
-              localStorage.setItem('hasImportedVideos', 'true');
-              setHasImportedBefore(true);
-            } catch (error) {
-              console.warn('Could not save import status to localStorage:', error);
-            }
-            
-            setShowYouTubeImporter(false);
+          onClose={() => uiActions.setShowYouTubeImporter(false)}
+          onVideosImported={(videos) => {
+            canvasActions.importThumbnails(videos);
+            try { localStorage.setItem('hasImportedVideos', 'true'); setHasImportedBefore(true); } catch {}
+            uiActions.setShowYouTubeImporter(false);
           }}
           onCreateChannelHeader={(channelName) => {
-            // Create a section header above the imported videos
-            const headerLabel = createLabelData(
-              channelName,
-              100, // Same X as first video
-              -20, // Much higher above the first row of videos (videos start at y:100, giving 120px space)
-              {
-                ...labelSettings,
-                size: 'XL' // Use extra large for channel headers
-              }
-            );
-            
-            const updatedLabels = [...textLabels, headerLabel];
-            setTextLabels(updatedLabels);
-            
-            // Save to history
-            saveToHistory('Add Channel Header', { textLabels: updatedLabels });
+            // Remove existing channel headers first, then add new one
+            const toRemove = textLabels.filter(label => label.metadata?.type === 'channelHeader').map(l => l.id);
+            if (toRemove.length > 0) {
+              canvasActions.deleteLabels(toRemove);
+            }
+            canvasActions.addLabel(channelName, { x: 100, y: -20 }, { ...labelSettings, size: 'XL' }, { type: 'channelHeader' });
           }}
         />
       )}
+      <ContentImportSidebar
+        isOpen={showContentImportSidebar}
+        onClose={() => uiActions.setShowContentImport(false)}
+        sidebarWidth={sidebarOpen ? sidebarWidth : 60}
+        onVideosImported={(videos) => {
+          canvasActions.importThumbnails(videos);
+          try { localStorage.setItem('hasImportedVideos', 'true'); setHasImportedBefore(true); } catch {}
+        }}
+        onCreateChannelHeader={(channelName) => {
+          // Remove existing channel headers first, then add new one
+          const toRemove = textLabels.filter(label => label.metadata?.type === 'channelHeader').map(l => l.id);
+          if (toRemove.length > 0) {
+            canvasActions.deleteLabels(toRemove);
+          }
+          canvasActions.addLabel(channelName, { x: 100, y: -20 }, { ...labelSettings, size: 'XL' }, { type: 'channelHeader' });
+        }}
+      />
     </div>
+  );
+};
+
+// Wrapper component that provides state context
+const FigmaStyleCanvasRefactored = () => {
+  return (
+    <CanvasStateProvider>
+      <FigmaStyleCanvasInternal />
+    </CanvasStateProvider>
   );
 };
 
