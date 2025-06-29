@@ -71,7 +71,7 @@ export const createTextLabelContainer = (labelData) => {
   // Parse background color with alpha
   const bgColor = labelData.style.backgroundColor || DEFAULT_LABEL_STYLE.backgroundColor;
   const bgAlpha = bgColor.includes('rgba') ? parseFloat(bgColor.match(/[\d.]+(?=\))/)[0]) : 1;
-  const bgHex = parseInt(labelData.style.color.replace('#', '0x')) || 0xFFFFFF;
+  const bgHex = parseInt((labelData.style.backgroundColor || '#FFFFFF').replace('#', '0x')) || 0xFFFFFF;
   
   background.fill({ color: DesignTokens.backgroundPrimary, alpha: bgAlpha });
   background.stroke({ width: 1, color: DesignTokens.borderDivider });
@@ -147,8 +147,10 @@ export const updateTextLabel = (container, newText, newStyle) => {
   container.background.clear();
   container.background.roundRect(0, 0, bgWidth, bgHeight, 8);
   
-  const bgAlpha = newStyle.backgroundColor.includes('rgba') 
-    ? parseFloat(newStyle.backgroundColor.match(/[\d.]+(?=\))/)[0]) 
+  // Ensure we have a backgroundColor to parse (fallback to default)
+  const bgColor = newStyle.backgroundColor || DEFAULT_LABEL_STYLE.backgroundColor;
+  const bgAlpha = bgColor.includes('rgba')
+    ? parseFloat(bgColor.match(/[\d.]+(?=\))/)?.[0] || '1')
     : 1;
   
   container.background.fill({ color: DesignTokens.backgroundPrimary, alpha: bgAlpha });
@@ -178,7 +180,7 @@ export const updateTextLabel = (container, newText, newStyle) => {
  * @param {Object} callbacks - Callback functions
  */
 export const setupTextLabelInteractions = (container, callbacks) => {
-  const { onSelect, onDragStart, onDragMove, onDragEnd, onDoubleClick } = callbacks;
+  const { onSelect, onDragStart, onDragMove, onDragEnd, onDoubleClick, isHandToolMode } = callbacks;
   
   let dragData = null;
   let isDragging = false;
@@ -212,7 +214,7 @@ export const setupTextLabelInteractions = (container, callbacks) => {
       if (onSelect) onSelect(container, e);
       
       // Start drag
-      if (onDragStart) {
+      if (onDragStart && (!isHandToolMode || !isHandToolMode())) {
         dragData = onDragStart(container, e);
         isDragging = !!dragData;
       }
@@ -254,7 +256,7 @@ export const setupTextLabelInteractions = (container, callbacks) => {
  * @param {Object} style - Style overrides
  * @returns {Object} - Label data
  */
-export const createLabelData = (text, x, y, style = {}) => {
+export const createLabelData = (text, x, y, style, metadata = {}) => {
   return {
     id: Date.now() + Math.random(), // Unique ID
     text: text || 'New Label',
@@ -264,6 +266,7 @@ export const createLabelData = (text, x, y, style = {}) => {
       ...DEFAULT_LABEL_STYLE,
       ...style
     },
+    metadata,
     createdAt: new Date().toISOString()
   };
 };

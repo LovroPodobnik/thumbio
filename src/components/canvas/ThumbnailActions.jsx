@@ -10,9 +10,9 @@ const ThumbnailActions = ({
   onCritiqueClick,
   isLocked
 }) => {
-  // Calculate position for action buttons (top-right of thumbnail)
-  const buttonX = position.x + 320 + 8; // thumbnail width + gap
-  const buttonY = position.y + 8; // Small offset from top
+  // Calculate position for action buttons (centered vertically, just outside the bounds)
+  const buttonX = position.x + 320 + 8; // thumbnail width + 8px gap
+  const buttonY = position.y + (244 / 2) - 54; // Center vertically: thumbnail height/2 - half of buttons height
   
   return (
     <div 

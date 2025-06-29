@@ -22,6 +22,7 @@ export const actions = {
   DELETE_DRAWINGS: 'DELETE_DRAWINGS',
   CLEAR_ALL_DRAWINGS: 'CLEAR_ALL_DRAWINGS',
   UPDATE_DRAWING_SETTINGS: 'UPDATE_DRAWING_SETTINGS',
+  SET_DRAWINGS: 'SET_DRAWINGS',
   
   // Text label actions
   ADD_LABEL: 'ADD_LABEL',
@@ -189,6 +190,7 @@ export function canvasReducer(state, action) {
     'ADD_DRAWING',
     'DELETE_DRAWINGS',
     'CLEAR_ALL_DRAWINGS',
+    'SET_DRAWINGS',
     'ADD_LABEL',
     'UPDATE_LABEL',
     'DELETE_LABELS',
@@ -348,6 +350,15 @@ export function canvasReducer(state, action) {
             ...newState.tools.drawing,
             ...action.payload
           }
+        }
+      };
+    
+    case 'SET_DRAWINGS':
+      return {
+        ...newState,
+        canvas: {
+          ...newState.canvas,
+          drawings: action.payload.drawings
         }
       };
     

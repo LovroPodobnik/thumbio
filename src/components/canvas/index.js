@@ -1,5 +1,5 @@
 // Export all canvas components from a single entry point
-export { default as FigmaStyleCanvasRefactored } from './FigmaStyleCanvasRefactored';
+export { default as FigmaStyleCanvasRefactored } from './FigmaStyleCanvasRefactoredClean';
 export { default as CommentPin } from './CommentPin';
 export { default as CommentDialog } from './CommentDialog';
 export { default as CommentToolbar } from './CommentToolbar';

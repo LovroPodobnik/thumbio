@@ -18,10 +18,17 @@ function App() {
 
   // Check URL params for test mode
   React.useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('test') === 'multiplayer') {
-      setShowMultiplayerTest(true);
-    }
+    const handleURLChange = () => {
+      const params = new URLSearchParams(window.location.search);
+      setShowMultiplayerTest(params.get('test') === 'multiplayer');
+    };
+
+    handleURLChange();
+    window.addEventListener('popstate', handleURLChange);
+
+    return () => {
+      window.removeEventListener('popstate', handleURLChange);
+    };
   }, []);
 
   return (
@@ -45,18 +52,6 @@ function App() {
           </>
         ) : (
           <>
-            <div className="absolute top-4 right-4 z-50">
-              <button
-                onClick={() => {
-                  setShowMultiplayerTest(true);
-                  window.history.pushState({}, '', '/?test=multiplayer');
-                }}
-                className="px-4 py-2 bg-blue-500 text-white rounded-md 
-                         hover:bg-blue-600 transition-colors"
-              >
-                Test Multiplayer
-              </button>
-            </div>
             <FigmaStyleCanvasRefactored />
           </>
         )}

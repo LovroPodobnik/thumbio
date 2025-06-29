@@ -25,6 +25,7 @@ export const usePixiRenderer = (
     setSelectedLabelIds,
     setLabelPositions,
     setEditingLabel,
+    areThumbnailsInteractive,
   }
 ) => {
   const thumbnailContainersRef = useRef([]);
@@ -58,31 +59,30 @@ export const usePixiRenderer = (
 
       // Setup interactions
       setupThumbnailInteractions(container, {
-        isDrawingMode: () => isDrawingModeRef.current,
+        areThumbnailsInteractive,
         onSelect: (selectedContainer, e) => {
           const event = e.originalEvent || e;
+          const { id } = selectedContainer.userData;
+
           if (event.shiftKey || event.metaKey) {
-            selectedContainer.selected = !selectedContainer.selected;
-            if (selectedContainer.selected) {
-              setSelectedIds(prev => new Set([...prev, selectedContainer.userData.id]));
+            // Multi-select logic (already good)
+            const newSelectedIds = new Set(selectedIds);
+            if (newSelectedIds.has(id)) {
+              newSelectedIds.delete(id);
             } else {
-              setSelectedIds(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(selectedContainer.userData.id);
-                return newSet;
-              });
+              newSelectedIds.add(id);
             }
-          } else if (!selectedContainer.selected) {
-            thumbnailContainersRef.current.forEach(c => {
-              c.selected = false;
-              c.selectionOutline.visible = false;
-              c.hoverOutline.visible = false;
-            });
-            selectedContainer.selected = true;
-            setSelectedIds(new Set([selectedContainer.userData.id]));
+            setSelectedIds(newSelectedIds);
+          } else {
+            // Single-select logic
+            // If it's already the only selected item, do nothing.
+            if (selectedIds.has(id) && selectedIds.size === 1) {
+              return;
+            }
+            
+            // Otherwise, select only this one.
+            setSelectedIds(new Set([id]));
           }
-          selectedContainer.selectionOutline.visible = selectedContainer.selected;
-          selectedContainer.hoverOutline.visible = false;
         },
         onDragStart: (dragContainer, e) => {
           const selectedContainers = thumbnailContainersRef.current.filter(c => c.selected);

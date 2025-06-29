@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 
-const CommentDialog = ({ 
-  position, 
-  viewportTransform, 
-  onSubmit, 
-  onCancel 
+const CommentDialog = ({
+  position,
+  viewportTransform,
+  onSubmit,
+  onCancel
 }) => {
+  const [comment, setComment] = useState('');
+
   return (
     <div
       className="absolute z-30"
@@ -17,13 +19,15 @@ const CommentDialog = ({
       <div className="bg-white border-2 border-blue-500 rounded-lg shadow-xl p-3 w-72">
         <textarea
           autoFocus
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
           className="w-full p-2 border border-gray-200 rounded resize-none focus:outline-none focus:border-blue-400"
           placeholder="Add a comment..."
           rows={3}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              onSubmit(e.target.value);
+              onSubmit(comment);
             } else if (e.key === 'Escape') {
               onCancel();
             }
@@ -39,10 +43,7 @@ const CommentDialog = ({
               Cancel
             </button>
             <button
-              onClick={(e) => {
-                const textarea = e.target.parentElement.parentElement.previousElementSibling;
-                onSubmit(textarea.value);
-              }}
+              onClick={() => onSubmit(comment)}
               className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
             >
               Comment

@@ -101,11 +101,6 @@ const useViewportCulling = (
         shouldSkipDetails: isMoving || renderQuality === 'low',
         priority: -distance // Negative so we can sort ascending
       });
-      
-      // Early exit if we've hit the max visible items limit
-      if (visibleItems.length >= maxVisibleItems) {
-        break;
-      }
     }
     
     // Sort by priority (distance from center)

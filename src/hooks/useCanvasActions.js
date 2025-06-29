@@ -92,6 +92,13 @@ export function useCanvasActions() {
       });
     },
     
+    setDrawings: (drawings) => {
+      dispatch({
+        type: actions.SET_DRAWINGS,
+        payload: { drawings }
+      });
+    },
+    
     deleteDrawings: (ids) => {
       dispatch({
         type: actions.DELETE_DRAWINGS,

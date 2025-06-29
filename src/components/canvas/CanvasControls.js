@@ -94,6 +94,8 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
     onDrawingMove,
     onDrawingEnd,
     isDrawingMode,
+    isHandToolMode,
+    isSelectionAllowed,
     onSpacePanStart,
     onSpacePanEnd
   } = callbacks;
@@ -116,8 +118,29 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
   app.stage.hitArea = app.screen;
   
   app.stage.on('pointerdown', (e) => {
+    // Handle hand tool mode FIRST - should work regardless of what was clicked
+    if (isHandToolMode && isHandToolMode()) {
+      isPanning = true;
+      const globalPos = e.global;
+      panStart = { x: globalPos.x, y: globalPos.y };
+      viewportStart = { x: viewport.x, y: viewport.y };
+      app.canvas.style.cursor = 'grabbing';
+      return;
+    }
+    
+    // Handle space panning FIRST - should work regardless of what was clicked
+    if (isSpacePanning) {
+      isPanning = true;
+      const globalPos = e.global;
+      panStart = { x: globalPos.x, y: globalPos.y };
+      viewportStart = { x: viewport.x, y: viewport.y };
+      app.canvas.style.cursor = 'grabbing';
+      return;
+    }
+    
+    // For all other interactions, only proceed if clicking on the stage
     if (e.target === app.stage) {
-      // Handle drawing mode - highest priority (but not when space panning)
+      // Handle drawing mode
       if (isDrawingMode && isDrawingMode() && !isSpacePanning) {
         const globalPos = e.global;
         const localPos = viewport.toLocal(globalPos);
@@ -131,7 +154,7 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
         return;
       }
       
-      // Handle comment mode - second priority
+      // Handle comment mode
       if (callbacks.isAddingComment && callbacks.isAddingComment()) {
         const globalPos = e.global;
         const localPos = viewport.toLocal(globalPos);
@@ -147,36 +170,38 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
         return;
       }
       
-      // Handle space panning - second priority
-      if (isSpacePanning) {
-        isPanning = true;
-        const globalPos = e.global;
-        panStart = { x: globalPos.x, y: globalPos.y };
-        viewportStart = { x: viewport.x, y: viewport.y };
-        return;
-      }
-      
       // Handle canvas click (for closing comments) - only if not in special modes
       if (onCanvasClick) {
         onCanvasClick();
       }
       
-      // Start rectangular selection - only if not in drawing mode
-      const globalPos = e.global;
-      const localPos = viewport.toLocal(globalPos);
+      // Check if we're in selection mode (not in any other tool mode)
+      const isInDrawingMode = isDrawingMode && isDrawingMode();
+      const isInHandToolMode = isHandToolMode && isHandToolMode();
+      const isInCommentMode = callbacks.isAddingComment && callbacks.isAddingComment();
+      const isInLabelMode = callbacks.isAddingLabel && callbacks.isAddingLabel();
       
-      // Clear selection if no modifier keys (unless shift/cmd for multi-select)
-      const originalEvent = e.originalEvent || e;
-      if (!originalEvent.shiftKey && !originalEvent.metaKey && !originalEvent.ctrlKey && onClearSelection) {
-        onClearSelection();
-      }
+      const inSelectionMode = !isInDrawingMode && !isInHandToolMode && 
+                             !isInCommentMode && !isInLabelMode && !isSpacePanning;
       
-      // Start rectangular selection
-      isRectSelecting = true;
-      rectSelectionStart = { x: localPos.x, y: localPos.y };
-      
-      if (onRectSelectionStart) {
-        onRectSelectionStart(rectSelectionStart, originalEvent);
+      if (inSelectionMode && isSelectionAllowed && isSelectionAllowed()) {
+        // Start rectangular selection - only in selection mode
+        const globalPos = e.global;
+        const localPos = viewport.toLocal(globalPos);
+        
+        // Clear selection if no modifier keys (unless shift/cmd for multi-select)
+        const originalEvent = e.originalEvent || e;
+        if (!originalEvent.shiftKey && !originalEvent.metaKey && !originalEvent.ctrlKey && onClearSelection) {
+          onClearSelection();
+        }
+        
+        // Start rectangular selection
+        isRectSelecting = true;
+        rectSelectionStart = { x: localPos.x, y: localPos.y };
+        
+        if (onRectSelectionStart) {
+          onRectSelectionStart(rectSelectionStart, originalEvent);
+        }
       }
     }
   });
@@ -239,6 +264,15 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
     // Handle panning end
     if (isPanning) {
       isPanning = false;
+      
+      // Restore cursor based on current tool
+      if (isHandToolMode && isHandToolMode()) {
+        app.canvas.style.cursor = 'grab';
+      } else if (isSpacePanning) {
+        app.canvas.style.cursor = 'grab';
+      } else {
+        app.canvas.style.cursor = 'default';
+      }
       return;
     }
     
@@ -273,6 +307,15 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
     // Handle panning end
     if (isPanning) {
       isPanning = false;
+      
+      // Restore cursor based on current tool
+      if (isHandToolMode && isHandToolMode()) {
+        app.canvas.style.cursor = 'grab';
+      } else if (isSpacePanning) {
+        app.canvas.style.cursor = 'grab';
+      } else {
+        app.canvas.style.cursor = 'default';
+      }
       return;
     }
     
@@ -341,6 +384,12 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
   };
   
   app.canvas.addEventListener('wheel', handleWheel, { passive: false });
+  
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+  };
+  
+  app.canvas.addEventListener('contextmenu', handleContextMenu);
   
   // Keyboard shortcuts
   const handleKeyDown = (e) => {
@@ -411,5 +460,6 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
     window.removeEventListener('keydown', handleKeyDown);
     window.removeEventListener('keyup', handleKeyUp);
     app.canvas.removeEventListener('wheel', handleWheel);
+    app.canvas.removeEventListener('contextmenu', handleContextMenu);
   };
 };

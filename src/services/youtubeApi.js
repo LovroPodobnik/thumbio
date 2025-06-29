@@ -1,8 +1,13 @@
 // YouTube Data API v3 Service
 import quotaTracker from './quotaTracker';
 
-const API_KEY = process.env.REACT_APP_YOUTUBE_API_KEY;
-const BASE_URL = 'https://www.googleapis.com/youtube/v3';
+const RAPIDAPI_KEY = process.env.REACT_APP_RAPIDAPI_KEY;
+const BASE_URL = 'https://youtube-v31.p.rapidapi.com';
+
+// Check if RapidAPI key is configured
+if (!RAPIDAPI_KEY || RAPIDAPI_KEY === 'your_rapidapi_key_here') {
+  console.error('[YouTube API] Error: RapidAPI key is not configured. Please add REACT_APP_RAPIDAPI_KEY to your .env file');
+}
 
 // Debug flag - set to false in production
 const DEBUG = process.env.NODE_ENV !== 'production';
@@ -50,8 +55,8 @@ const canMakeRequest = (operationType = 'SEARCH') => {
     throw new Error('Daily API quota exceeded. Please try again tomorrow.');
   }
   
-  if (!API_KEY) {
-    throw new Error('YouTube API key is not configured. Please add REACT_APP_YOUTUBE_API_KEY to your environment variables.');
+  if (!RAPIDAPI_KEY) {
+    throw new Error('RapidAPI key is not configured. Please add REACT_APP_RAPIDAPI_KEY to your environment variables.');
   }
   
   // Check YouTube API quota
@@ -91,12 +96,17 @@ export const searchVideos = async (query, maxResults = 20, sortBy = 'relevance')
       part: 'snippet',
       q: query,
       type: 'video',
-      maxResults: maxResults,
-      key: API_KEY
+      maxResults: maxResults
     });
     logger.log('[YouTube API] Request URL:', url);
     
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    });
     logger.log('[YouTube API] Response status:', response.status);
     logger.log('[YouTube API] Response headers:', Object.fromEntries(response.headers.entries()));
     
@@ -189,9 +199,14 @@ export const fetchChannelVideos = async (channelInput, maxResults = 20, sortBy =
         channelId: channelId,
         type: 'video',
         order: order,
-        maxResults: maxResults,
-        key: API_KEY
-      })
+        maxResults: maxResults
+      }), {
+        method: 'GET',
+        headers: {
+          'X-RapidAPI-Key': RAPIDAPI_KEY,
+          'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+        }
+      }
     );
     
     if (!response.ok) throw new Error('Failed to fetch channel videos');
@@ -353,9 +368,14 @@ const verifyChannelExists = async (channelId) => {
   const response = await fetch(
     `${BASE_URL}/channels?` + new URLSearchParams({
       part: 'snippet,statistics',
-      id: channelId,
-      key: API_KEY
-    })
+      id: channelId
+    }), {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    }
   );
   
   if (!response.ok) throw new Error('Failed to verify channel');
@@ -388,9 +408,14 @@ const findChannelByHandle = async (handle) => {
       part: 'snippet',
       q: searchQuery,
       type: 'channel',
-      maxResults: 10, // Get more results for better matching
-      key: API_KEY
-    })
+      maxResults: 10 // Get more results for better matching
+    }), {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    }
   );
   
   if (!response.ok) throw new Error('Failed to search for channel');
@@ -455,9 +480,14 @@ export const searchChannelsForAutocomplete = async (query, maxResults = 8) => {
         part: 'snippet',
         q: query,
         type: 'channel',
-        maxResults: maxResults,
-        key: API_KEY
-      })
+        maxResults: maxResults
+      }), {
+        method: 'GET',
+        headers: {
+          'X-RapidAPI-Key': RAPIDAPI_KEY,
+          'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+        }
+      }
     );
     
     if (!response.ok) {
@@ -514,9 +544,14 @@ const fetchChannelDetails = async (channelIds) => {
   const response = await fetch(
     `${BASE_URL}/channels?` + new URLSearchParams({
       part: 'statistics',
-      id: channelIds,
-      key: API_KEY
-    })
+      id: channelIds
+    }), {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    }
   );
   
   if (!response.ok) throw new Error('Failed to fetch channel details');
@@ -530,6 +565,11 @@ const fetchChannelDetails = async (channelIds) => {
  * @returns {Promise<Object>} Channel result with verification
  */
 const searchAndVerifyChannel = async (searchTerm, searchType) => {
+  // Check RapidAPI key before making request
+  if (!RAPIDAPI_KEY || RAPIDAPI_KEY === 'your_rapidapi_key_here') {
+    throw new Error('RapidAPI key is not configured. Please add a valid RapidAPI key to your .env file');
+  }
+
   canMakeRequest('SEARCH');
   trackRequest();
   
@@ -547,12 +587,29 @@ const searchAndVerifyChannel = async (searchTerm, searchType) => {
       part: 'snippet',
       q: searchQuery,
       type: 'channel',
-      maxResults: 10, // Get more results for better matching
-      key: API_KEY
-    })
+      maxResults: 10 // Get more results for better matching
+    }), {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    }
   );
   
-  if (!response.ok) throw new Error('Failed to search for channel');
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    const errorMessage = errorData?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+    logger.error(`[YouTube API] Search failed: ${errorMessage}`);
+    
+    if (response.status === 403) {
+      throw new Error('YouTube API access denied. Please check your API key and ensure the YouTube Data API v3 is enabled');
+    } else if (response.status === 429) {
+      throw new Error('YouTube API quota exceeded. Please try again later');
+    }
+    
+    throw new Error(`Failed to search for channel: ${errorMessage}`);
+  }
   
   const data = await response.json();
   if (data.items.length === 0) {
@@ -661,12 +718,17 @@ export const fetchVideoDetails = async (videoIds) => {
     quotaTracker.trackOperation('VIDEOS_LIST', { videoCount });
     const url = `${BASE_URL}/videos?` + new URLSearchParams({
       part: 'statistics,contentDetails',
-      id: videoIds,
-      key: API_KEY
+      id: videoIds
     });
     logger.log('[YouTube API - fetchVideoDetails] Request URL:', url);
     
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    });
     logger.log('[YouTube API - fetchVideoDetails] Response status:', response.status);
     
     if (!response.ok) {
@@ -978,9 +1040,14 @@ const fetchChannelVideosBatch = async (channelId, maxResults, order) => {
       channelId: channelId,
       type: 'video',
       order: order,
-      maxResults: maxResults,
-      key: API_KEY
-    })
+      maxResults: maxResults
+    }), {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    }
   );
   
   if (!response.ok) throw new Error(`Failed to fetch videos with order: ${order}`);
@@ -1061,9 +1128,14 @@ const getUploadsPlaylistId = async (channelId) => {
   const response = await fetch(
     `${BASE_URL}/channels?` + new URLSearchParams({
       part: 'contentDetails',
-      id: channelId,
-      key: API_KEY
-    })
+      id: channelId
+    }), {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    }
   );
 
   if (!response.ok) throw new Error('Failed to fetch uploads playlist id');
@@ -1086,9 +1158,14 @@ const fetchPlaylistVideos = async (playlistId, maxResults = 50) => {
     `${BASE_URL}/playlistItems?` + new URLSearchParams({
       part: 'snippet',
       playlistId,
-      maxResults,
-      key: API_KEY
-    })
+      maxResults
+    }), {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+      }
+    }
   );
 
   if (!response.ok) throw new Error('Failed to fetch playlist items');
@@ -1131,9 +1208,14 @@ const fetchChannelVideosPaginated = async (
           type: 'video',
           order,
           maxResults: 50,
-          pageToken: nextPageToken,
-          key: API_KEY
-        })
+          pageToken: nextPageToken
+        }), {
+        method: 'GET',
+        headers: {
+          'X-RapidAPI-Key': RAPIDAPI_KEY,
+          'X-RapidAPI-Host': 'youtube-v31.p.rapidapi.com'
+        }
+      }
     );
     if (!resp.ok) throw new Error('Paginated fetch failed');
     const data = await resp.json();

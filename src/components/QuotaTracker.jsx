@@ -27,15 +27,20 @@ const QuotaTracker = ({ className = '', compact = false }) => {
   }, []);
 
   const updateQuotaStatus = () => {
-    const status = quotaTracker.getQuotaStatus();
-    const timeUntilReset = quotaTracker.getFormattedTimeUntilReset();
-    const usageByType = quotaTracker.getUsageByType();
-    
-    setQuotaStatus({
-      ...status,
-      timeUntilReset,
-      usageByType,
-    });
+    try {
+      const status = quotaTracker.getQuotaStatus();
+      const timeUntilReset = quotaTracker.getFormattedTimeUntilReset();
+      const usageByType = quotaTracker.getUsageByType();
+      
+      setQuotaStatus({
+        ...status,
+        timeUntilReset,
+        usageByType,
+      });
+    } catch (error) {
+      console.error('Failed to update quota status:', error);
+      // Optionally set an error state to display to user
+    }
   };
 
   if (!quotaStatus) return null;
@@ -72,7 +77,7 @@ const QuotaTracker = ({ className = '', compact = false }) => {
         <span className="text-xs font-medium">
           {used.toLocaleString()} / {dailyLimit.toLocaleString()}
         </span>
-        <div className="w-16 h-1.5 bg-neutral-20 rounded-full overflow-hidden">
+        <div className="w-16 h-1.5 bg-neutral-200 rounded-full overflow-hidden">
           <div 
             className={`h-full transition-all duration-300 ${getProgressBarColor()}`}
             style={{ width: `${Math.min(percentage, 100)}%` }}

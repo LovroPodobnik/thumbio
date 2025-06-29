@@ -1,0 +1,142 @@
+import { useEffect, useRef } from 'react';
+import * as PIXI from 'pixi.js';
+import { 
+  createGridSprite, 
+  updateGridPosition, 
+  setupCanvasControls 
+} from '../components/canvas/CanvasControls';
+import { createDrawingSystem } from '../components/canvas/DrawingRenderer';
+
+// Configure PIXI global settings for high-DPI support
+if (typeof window !== 'undefined' && window.devicePixelRatio) {
+  // In PIXI v8, settings are configured differently
+  // Set default texture options
+  PIXI.TextureSource.defaultOptions.scaleMode = 'linear';
+  PIXI.TextureSource.defaultOptions.resolution = window.devicePixelRatio || 1;
+}
+
+export const usePixiAppInitialization = (
+  containerRef,
+  onViewportTransform,
+  controlsConfig,
+  multiplayerSetupCursor
+) => {
+  const appRef = useRef();
+  const viewportRef = useRef();
+  const gridGraphicsRef = useRef();
+  const selectionRectGraphicsRef = useRef();
+  const drawingSystemRef = useRef();
+  const tempDrawingGraphicsRef = useRef();
+  const cleanupRef = useRef();
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    
+    let app;
+    let destroyed = false;
+    
+    const initPixi = async () => {
+      app = new PIXI.Application();
+      
+      await app.init({
+        width: window.innerWidth,
+        height: window.innerHeight,
+        backgroundColor: 0xf5f5f5,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+        antialias: true,
+        backgroundAlpha: 1,
+        clearBeforeRender: true,
+        preserveDrawingBuffer: false,
+        powerPreference: 'high-performance',
+        hello: true,
+        roundPixels: false,
+      });
+      
+      if (destroyed || !containerRef.current) {
+        app.destroy(true);
+        return;
+      }
+      
+      containerRef.current.appendChild(app.canvas);
+      appRef.current = app;
+      
+      // Create main viewport container
+      const viewport = new PIXI.Container();
+      viewport.eventMode = 'passive';
+      viewportRef.current = viewport;
+      app.stage.addChild(viewport);
+      
+      // Grid background
+      const gridSprite = createGridSprite(app);
+      gridGraphicsRef.current = gridSprite;
+      app.stage.addChildAt(gridSprite, 0);
+      
+      // Selection rectangle graphics
+      const selectionRectGraphics = new PIXI.Graphics();
+      selectionRectGraphicsRef.current = selectionRectGraphics;
+      viewport.addChild(selectionRectGraphics);
+      
+      // Drawing system
+      const drawingSystem = createDrawingSystem(app, viewport);
+      drawingSystemRef.current = drawingSystem;
+      
+      // Temporary drawing graphics
+      const tempDrawingGraphics = new PIXI.Graphics();
+      tempDrawingGraphicsRef.current = tempDrawingGraphics;
+      drawingSystem.foregroundDrawingsContainer.addChild(tempDrawingGraphics);
+      
+      // Initial grid position update
+      updateGridPosition(gridSprite, viewport, app);
+      onViewportTransform({
+        x: viewport.x,
+        y: viewport.y,
+        scale: viewport.scale.x
+      });
+
+      // Setup multiplayer cursor tracking if provided
+      let cursorCleanup;
+      if (multiplayerSetupCursor) {
+        cursorCleanup = multiplayerSetupCursor(app, viewport);
+      }
+      
+      // Setup canvas controls
+      const controlsCleanup = setupCanvasControls(app, viewport, gridSprite, controlsConfig);
+      
+      cleanupRef.current = () => {
+        controlsCleanup();
+        if (cursorCleanup) cursorCleanup();
+      };
+    };
+    
+    initPixi();
+    
+    // Cleanup
+    return () => {
+      destroyed = true;
+      if (cleanupRef.current) cleanupRef.current();
+      if (appRef.current) {
+        const currentApp = appRef.current;
+        appRef.current = null;
+        
+        try {
+          if (currentApp.canvas && currentApp.canvas.parentNode) {
+            currentApp.canvas.parentNode.removeChild(currentApp.canvas);
+          }
+          currentApp.destroy(true);
+        } catch (error) {
+          // Silently handle cleanup errors
+        }
+      }
+    };
+  }, []);
+
+  return {
+    appRef,
+    viewportRef,
+    gridGraphicsRef,
+    selectionRectGraphicsRef,
+    drawingSystemRef,
+    tempDrawingGraphicsRef
+  };
+};

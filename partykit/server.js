@@ -71,11 +71,25 @@ export default class CanvasRoom {
   }
 
   async onMessage(message, conn) {
-    const data = JSON.parse(message);
+    let data;
+    try {
+      data = JSON.parse(message);
+    } catch (e) {
+      console.error('Invalid JSON:', e);
+      return;
+    }
+
     const userId = conn.id;
-    
+
     switch (data.type) {
       case 'cursor':
+        // Validate cursor data
+        if (typeof data.x !== 'number' || typeof data.y !== 'number' ||
+            !isFinite(data.x) || !isFinite(data.y)) {
+          console.error(`Invalid cursor data from ${userId}:`, data);
+          return;
+        }
+
         // Store cursor position
         this.cursors.set(userId, {
           x: data.x,
@@ -103,6 +117,10 @@ export default class CanvasRoom {
           type: 'cursor-leave',
           userId
         }, [conn.id]);
+        break;
+        
+      default:
+        console.warn(`Unknown message type: ${data.type}`);
         break;
     }
   }

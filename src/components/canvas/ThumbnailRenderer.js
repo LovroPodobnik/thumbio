@@ -478,26 +478,41 @@ export const createThumbnailContainer = (thumb, selectedIds, isLocked = false) =
 };
 
 // Export function to update thumbnail event mode
-export const updateThumbnailEventMode = (container, isDrawingMode) => {
-  if (isDrawingMode) {
-    container.eventMode = 'none'; // Make transparent to events in drawing mode
+export const updateThumbnailEventMode = (container, shouldDisable) => {
+  if (shouldDisable) {
+    container.eventMode = 'none'; // Make transparent to events
   } else {
     container.eventMode = 'static'; // Normal interaction mode
   }
 };
 
 export const setupThumbnailInteractions = (container, callbacks) => {
-  const { onHover, onHoverOut, onSelect, onDragStart, onDragMove, onDragEnd, isDrawingMode } = callbacks;
+  const { onHover, onHoverOut, onSelect, onDragStart, onDragMove, onDragEnd, areThumbnailsInteractive } = callbacks;
   
-  // Initial setup - set event mode based on current drawing state
-  updateThumbnailEventMode(container, isDrawingMode && isDrawingMode());
+  // Determine if thumbnails should be interactive
+  const isInteractive = areThumbnailsInteractive && areThumbnailsInteractive();
   
-  // Store reference to check drawing mode for hover effects
-  container._isDrawingMode = isDrawingMode;
+  // Set initial event mode
+  updateThumbnailEventMode(container, !isInteractive);
+  
+  // Store interactive state for dynamic checks
+  container._areThumbnailsInteractive = areThumbnailsInteractive;
+  
+  // Set initial cursor based on interactive state
+  if (isInteractive) {
+    container.cursor = 'pointer';
+  } else {
+    container.cursor = 'inherit';
+  }
   
   container.on('pointerover', () => {
-    // Don't change hover state or cursor when drawing mode is active
-    if (container._isDrawingMode && container._isDrawingMode()) {
+    // Check if interactive first
+    const isInteractive = container._areThumbnailsInteractive && container._areThumbnailsInteractive();
+    
+    // Only show hover effects if interactive
+    if (!isInteractive) {
+      // Don't show hover effects when hand tool is active
+      container.cursor = 'inherit'; // Inherit cursor from parent (should be grab/grabbing)
       return;
     }
     
@@ -510,9 +525,11 @@ export const setupThumbnailInteractions = (container, callbacks) => {
   });
   
   container.on('pointerout', () => {
-    // Always clean up hover state, but respect drawing mode
-    if (!(container._isDrawingMode && container._isDrawingMode())) {
-      container.hoverOutline.visible = false;
+    // Always hide hover outline on pointer out
+    container.hoverOutline.visible = false;
+    
+    // Only call callback if interactive
+    if (container._areThumbnailsInteractive && container._areThumbnailsInteractive()) {
       if (onHoverOut) onHoverOut(container);
     }
   });
@@ -521,27 +538,35 @@ export const setupThumbnailInteractions = (container, callbacks) => {
   let isDragging = false;
   
   container.on('pointerdown', (e) => {
-    // This should not fire in drawing mode due to eventMode = 'none'
+    // Check if thumbnails are interactive first
+    const isInteractive = container._areThumbnailsInteractive && container._areThumbnailsInteractive();
     
-    // Normal thumbnail interaction (selection/dragging)
+    if (!isInteractive) {
+      // When not interactive (e.g. hand tool), don't stop propagation
+      // This allows the event to bubble up to the canvas stage for panning
+      return;
+    }
+    
+    // Only handle interactions if the thumbnail is interactive
     if (onSelect) onSelect(container, e);
     if (onDragStart) {
       dragData = onDragStart(container, e);
       isDragging = true;
     }
-    e.stopPropagation(); // Stop propagation for normal interactions
+    // Stop propagation only for normal interactions
+    e.stopPropagation();
   });
   
   container.on('pointermove', (e) => {
-    // Only handle thumbnail dragging if not in drawing mode
-    if (isDragging && dragData && onDragMove && !(container._isDrawingMode && container._isDrawingMode())) {
+    // Only handle thumbnail dragging if interactive
+    if (isDragging && dragData && onDragMove && container._areThumbnailsInteractive && container._areThumbnailsInteractive()) {
       onDragMove(container, e, dragData);
     }
   });
   
   container.on('pointerup', () => {
-    // Only handle thumbnail drag end if not in drawing mode
-    if (isDragging && dragData && onDragEnd && !(container._isDrawingMode && container._isDrawingMode())) {
+    // Only handle thumbnail drag end if interactive
+    if (isDragging && dragData && onDragEnd && container._areThumbnailsInteractive && container._areThumbnailsInteractive()) {
       onDragEnd(container, dragData);
     }
     isDragging = false;
@@ -549,8 +574,8 @@ export const setupThumbnailInteractions = (container, callbacks) => {
   });
   
   container.on('pointerupoutside', () => {
-    // Only handle thumbnail drag end if not in drawing mode
-    if (isDragging && dragData && onDragEnd && !(container._isDrawingMode && container._isDrawingMode())) {
+    // Only handle thumbnail drag end if interactive
+    if (isDragging && dragData && onDragEnd && container._areThumbnailsInteractive && container._areThumbnailsInteractive()) {
       onDragEnd(container, dragData);
     }
     isDragging = false;
