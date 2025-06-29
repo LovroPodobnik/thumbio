@@ -159,3 +159,174 @@ Configured for Vercel with SPA routing. The `vercel.json` handles client-side ro
 - Card components for simple text sections
 - Excessive shadows or 3D effects
 - Category-specific color coding
+
+## React Performance Best Practices
+
+### Critical Performance Rules for Canvas Applications
+
+#### 1. State Initialization - Prevent Object Recreation
+**❌ WRONG**: Creates new objects on every render
+```javascript
+// This creates a new Set on EVERY render
+const [selectedIds, setSelectedIds] = useState(new Set());
+const [cache, setCache] = useState(new Map());
+const [config, setConfig] = useState({ width: 100, height: 100 });
+```
+
+**✅ CORRECT**: Use lazy initialization
+```javascript
+// Object is created only once during initialization
+const [selectedIds, setSelectedIds] = useState(() => new Set());
+const [cache, setCache] = useState(() => new Map());
+const [config, setConfig] = useState(() => ({ width: 100, height: 100 }));
+```
+
+#### 2. useEffect Dependencies - Be Specific
+**❌ WRONG**: Using entire objects or spreading props
+```javascript
+// This will trigger on EVERY parent re-render
+useEffect(() => {
+  // expensive canvas setup
+}, [props]); // props object changes every render
+
+// Also wrong - spreading creates unstable dependencies
+useEffect(() => {
+  // setup code
+}, [...Object.values(props)]);
+```
+
+**✅ CORRECT**: Extract specific values
+```javascript
+// Only re-runs when these specific values change
+const { isEnabled, width, height, onUpdate } = props;
+useEffect(() => {
+  // expensive canvas setup
+}, [isEnabled, width, height, onUpdate]);
+```
+
+#### 3. Callback and Object Stability
+**❌ WRONG**: Creating objects/functions that cause downstream effects
+```javascript
+// This recreates handlers on every render
+const handlers = {
+  onClick: () => doSomething(),
+  onHover: () => doAnother()
+};
+
+// This causes child components to re-render
+return <CanvasControls handlers={handlers} />;
+```
+
+**✅ CORRECT**: Memoize objects that are used as dependencies
+```javascript
+// Stable reference across renders
+const handlers = useMemo(() => ({
+  onClick: () => doSomething(),
+  onHover: () => doAnother()
+}), [doSomething, doAnother]);
+
+// Or use individual callbacks
+const handleClick = useCallback(() => doSomething(), [doSomething]);
+const handleHover = useCallback(() => doAnother(), [doAnother]);
+```
+
+#### 4. Ref Updates Don't Need Dependencies
+**❌ WRONG**: Including all values when updating a ref
+```javascript
+useEffect(() => {
+  myRef.current = { value1, value2, value3 };
+}, [value1, value2, value3]); // Unnecessary dependencies
+```
+
+**✅ CORRECT**: Refs can be updated without dependencies
+```javascript
+// Since we're updating a ref, we can omit dependencies
+// The ref will always have access to current values through closures
+useEffect(() => {
+  myRef.current = { value1, value2, value3 };
+});
+```
+
+#### 5. Canvas-Specific Optimizations
+**❌ WRONG**: Using state values directly in render loops
+```javascript
+const drawingHandlers = useMemo(() => ({
+  onMove: (point) => {
+    // This recreates handlers when drawings change
+    const filtered = drawings.filter(d => ...);
+  }
+}), [drawings]); // Unstable dependency
+```
+
+**✅ CORRECT**: Use refs for frequently changing values
+```javascript
+// Keep frequently changing values in refs
+useEffect(() => {
+  drawingsRef.current = drawings;
+}, [drawings]);
+
+const drawingHandlers = useMemo(() => ({
+  onMove: (point) => {
+    // Access current value without recreating handler
+    const filtered = drawingsRef.current.filter(d => ...);
+  }
+}), []); // Stable - no dependencies needed
+```
+
+### Performance Checklist for New Features
+
+Before merging any canvas-related feature:
+
+- [ ] **State Initialization**: All Set, Map, or Object states use lazy initialization
+- [ ] **useEffect Audit**: No object/array spreads or entire objects in dependencies
+- [ ] **Callback Stability**: Event handlers wrapped in useCallback where needed
+- [ ] **Object References**: Objects passed as props are memoized
+- [ ] **Ref Usage**: Frequently changing values stored in refs, not state
+- [ ] **Render Optimization**: Canvas render functions don't recreate on every call
+- [ ] **Event Handlers**: Mouse/keyboard handlers don't cause re-renders
+
+### Testing Performance
+
+```javascript
+// Add this to development builds to catch issues
+if (process.env.NODE_ENV === 'development') {
+  // Log when expensive components re-render
+  console.log(`${ComponentName} rendered`);
+  
+  // Track render count
+  const renderCount = useRef(0);
+  renderCount.current++;
+  console.log(`Render #${renderCount.current}`);
+}
+```
+
+### Common Canvas Performance Patterns
+
+1. **Batched Updates**: Group multiple state updates
+```javascript
+// Instead of multiple setState calls
+setX(newX);
+setY(newY);
+setScale(newScale);
+
+// Use a single update
+setCanvasState(prev => ({ ...prev, x: newX, y: newY, scale: newScale }));
+```
+
+2. **Throttled Handlers**: For high-frequency events
+```javascript
+const handleMouseMove = useCallback(
+  throttle((e) => {
+    // Handle movement
+  }, 16), // ~60fps
+  []
+);
+```
+
+3. **Viewport Culling**: Only render visible elements
+```javascript
+const visibleItems = useMemo(() => 
+  items.filter(item => isInViewport(item, viewport)),
+  [items, viewport]
+);
+```

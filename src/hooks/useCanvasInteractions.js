@@ -69,13 +69,13 @@ export const useCanvasInteractions = (
           c.selectionOutline.visible = false;
           c.hoverOutline.visible = false;
         });
-        setSelectedIds(new Set());
+        setSelectedIds([]);
         textLabelContainersRef.current.forEach(c => {
           c.selected = false;
           c.selectionOutline.visible = false;
           c.hoverBg.visible = false;
         });
-        setSelectedLabelIds(new Set());
+        setSelectedLabelIds([]);
       },
       onCanvasClick: () => {
         setEditingComment(null);
@@ -115,8 +115,8 @@ export const useCanvasInteractions = (
             intersectingLabelIds.forEach(id => newSelectedLabelIds.has(id) ? newSelectedLabelIds.delete(id) : newSelectedLabelIds.add(id));
           } else newSelectedLabelIds = intersectingLabelIds;
 
-          setSelectedIds(newSelectedIds);
-          setSelectedLabelIds(newSelectedLabelIds);
+          setSelectedIds(Array.from(newSelectedIds));
+          setSelectedLabelIds(Array.from(newSelectedLabelIds));
 
           thumbnailContainersRef.current.forEach(c => {
             c.selected = newSelectedIds.has(c.userData.id);
@@ -129,8 +129,14 @@ export const useCanvasInteractions = (
             c.hoverBg.visible = false;
           });
 
-          if (newSelectedIds.size !== selectedIds.size || newSelectedLabelIds.size !== selectedLabelIds.size) {
-            saveToHistory('Rectangular Selection', { selectedIds: newSelectedIds, selectedLabelIds: newSelectedLabelIds });
+          const currentSelectedCount = selectedIds instanceof Set ? selectedIds.size : selectedIds.length;
+          const currentLabelCount = selectedLabelIds instanceof Set ? selectedLabelIds.size : selectedLabelIds.length;
+          
+          if (newSelectedIds.size !== currentSelectedCount || newSelectedLabelIds.size !== currentLabelCount) {
+            saveToHistory('Rectangular Selection', { 
+              selectedIds: Array.from(newSelectedIds), 
+              selectedLabelIds: Array.from(newSelectedLabelIds) 
+            });
           }
         }
         setSelectionRect(null);
@@ -214,7 +220,7 @@ export const useCanvasInteractions = (
               thumbnailContainersRef.current = thumbnailContainersRef.current.filter(c => !c.selected);
               const updated = youtubeThumbnails.filter(t => !deletedIds.includes(t.id));
               setYoutubeThumbnails(updated);
-              setSelectedIds(new Set());
+              setSelectedIds([]);
               historyData.youtubeThumbnails = updated;
               action = 'Delete Thumbnails';
             }
@@ -224,7 +230,7 @@ export const useCanvasInteractions = (
               textLabelContainersRef.current = textLabelContainersRef.current.filter(c => !c.selected);
               const updated = textLabels.filter(l => !deletedIds.includes(l.id));
               setTextLabels(updated);
-              setSelectedLabelIds(new Set());
+              setSelectedLabelIds([]);
               historyData.textLabels = updated;
               const updatedPos = { ...labelPositions };
               deletedIds.forEach(id => delete updatedPos[id]);
@@ -238,15 +244,15 @@ export const useCanvasInteractions = (
         if (e.key === 'a' && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           thumbnailContainersRef.current.forEach(c => { c.selected = true; c.selectionOutline.visible = true; });
-          setSelectedIds(new Set(thumbnailContainersRef.current.map(c => c.userData.id)));
+          setSelectedIds(thumbnailContainersRef.current.map(c => c.userData.id));
           textLabelContainersRef.current.forEach(c => { c.selected = true; c.selectionOutline.visible = true; });
-          setSelectedLabelIds(new Set(textLabelContainersRef.current.map(c => c.labelData.id)));
+          setSelectedLabelIds(textLabelContainersRef.current.map(c => c.labelData.id));
         }
         if (e.key === 'Escape') {
           thumbnailContainersRef.current.forEach(c => { c.selected = false; c.selectionOutline.visible = false; });
-          setSelectedIds(new Set());
+          setSelectedIds([]);
           textLabelContainersRef.current.forEach(c => { c.selected = false; c.selectionOutline.visible = false; c.hoverBg.visible = false; });
-          setSelectedLabelIds(new Set());
+          setSelectedLabelIds([]);
           if (isAddingComment) toolActions.selectSelectionTool();
           setPendingCommentPos(null);
           setEditingComment(null);
@@ -272,6 +278,14 @@ export const useCanvasInteractions = (
   }, [
     isMultiplayerEnabled, canvasTools, youtubeThumbnails, selectedIds, lockedThumbnails, 
     drawings, textLabels, labelPositions, selectedLabelIds, appRef, viewportRef, 
-    gridGraphicsRef, selectionRectGraphicsRef, tempDrawingGraphicsRef, props
+    gridGraphicsRef, selectionRectGraphicsRef, tempDrawingGraphicsRef, multiplayerManager,
+    lastCursorPositionRef, setViewportTransform, setPendingCommentPos, isAddingCommentRef,
+    isDrawingModeRef, isHandToolModeRef, isAddingLabelRef, handleLabelCreate, isSpacePanningRef,
+    thumbnailContainersRef, textLabelContainersRef, throttledUpdateSelection, saveToHistory,
+    drawingSettingsRef, drawingsRef, setCurrentDrawing, currentDrawingRef, toolActions,
+    handleZoomIn, handleZoomOut, handleZoomToFit, undo, redo, thumbnails, setSelectedIds,
+    setSelectedLabelIds, setEditingComment, setEditingLabel, setIsRectSelecting, setSelectionRect,
+    setDrawings, setIsDrawing, setYoutubeThumbnails, setTextLabels, setLabelPositions,
+    editingLabel, isAddingComment
   ]);
 };

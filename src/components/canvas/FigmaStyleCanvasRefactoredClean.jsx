@@ -46,8 +46,6 @@ const FigmaStyleCanvasInternal = () => {
   
   // Refs
   const containerRef = useRef();
-  const thumbnailContainersRef = useRef([]);
-  const textLabelContainersRef = useRef([]);
   const drawingSettingsRef = useRef();
   const drawingsRef = useRef([]);
   const labelSettingsRef = useRef(DEFAULT_LABEL_STYLE);
@@ -171,10 +169,10 @@ const FigmaStyleCanvasInternal = () => {
     onRectSelectionStart: (startPoint, modifierKeys) => controlCallbacksRef.current.onRectSelectionStart(startPoint, modifierKeys),
     onRectSelectionMove: (startPoint, currentPoint, modifierKeys) => controlCallbacksRef.current.onRectSelectionMove(startPoint, currentPoint, modifierKeys),
     onRectSelectionEnd: (startPoint, endPoint, modifierKeys) => controlCallbacksRef.current.onRectSelectionEnd(startPoint, endPoint, modifierKeys),
-    onDrawingStart: () => controlCallbacksRef.current.onDrawingStart(),
-    onDrawingMove: () => controlCallbacksRef.current.onDrawingMove(),
+    onDrawingStart: (startPoint) => controlCallbacksRef.current.onDrawingStart(startPoint),
+    onDrawingMove: (startPoint, currentPoint) => controlCallbacksRef.current.onDrawingMove(startPoint, currentPoint),
     onDrawingEnd: () => controlCallbacksRef.current.onDrawingEnd(),
-    onKeyDown: () => controlCallbacksRef.current.onKeyDown()
+    onKeyDown: (e) => controlCallbacksRef.current.onKeyDown(e)
   }), [uiActions]);
 
   // Initialize PixiJS app and get refs
@@ -194,8 +192,12 @@ const FigmaStyleCanvasInternal = () => {
 
   // Zoom controls are now initialized through useCanvasToolsIntegrated
 
+  // Create refs for tool states
+  const isAddingCommentRef = useRef(false);
+  const isAddingLabelRef = useRef(false);
+
   // Initialize PixiJS thumbnail and label rendering
-  usePixiRenderer(
+  const { thumbnailContainersRef, textLabelContainersRef } = usePixiRenderer(
     appRef,
     viewportRef,
     drawingSystemRef,
@@ -219,10 +221,6 @@ const FigmaStyleCanvasInternal = () => {
       areThumbnailsInteractive: () => controlCallbacksRef.current.areThumbnailsInteractive(),
     }
   );
-
-  // Create refs for tool states
-  const isAddingCommentRef = useRef(false);
-  const isAddingLabelRef = useRef(false);
 
   // Initialize canvas tools (must be after PixiJS initialization to have access to refs)
   const canvasTools = useCanvasToolsIntegrated({
@@ -258,6 +256,10 @@ const FigmaStyleCanvasInternal = () => {
     thumbnailContainersRef,
     textLabelContainersRef,
     selectionRectGraphicsRef,
+    
+    // Current state values
+    selectedIds,
+    selectedLabelIds,
     
     // State setters
     setSelectedIds: selectionActions.setSelection,
@@ -308,10 +310,15 @@ const FigmaStyleCanvasInternal = () => {
 
   // Handle label creation (defined after tools to access isAddingLabel and toolActions)
   const handleLabelCreate = useCallback((pos) => {
+    console.log('📝 Creating new label at position:', pos);
     const newLabel = canvasActions.addLabel('New Section', pos, labelSettings);
+    console.log('✅ Label created:', newLabel);
     uiActions.setEditingLabel(newLabel);
-    if (isAddingLabel) toolActions.selectSelectionTool();
-  }, [canvasActions, labelSettings, uiActions, isAddingLabel, toolActions]);
+    // Select the newly created label
+    selectionActions.setLabelSelection([newLabel.id]);
+    // Switch back to selection tool after creating label
+    toolActions.selectSelectionTool();
+  }, [canvasActions, labelSettings, uiActions, toolActions, selectionActions]);
 
   // Create save to history function
   const saveToHistory = useCallback((action, data) => {
@@ -331,6 +338,8 @@ const FigmaStyleCanvasInternal = () => {
   }), [isMultiplayerConnected]);
 
   // Initialize canvas interactions hook (includes drawing handlers)
+  // TODO: This is redundant with controlsConfig in usePixiAppInitialization - investigate removal
+  /*
   useCanvasInteractions(
     appRef,
     viewportRef,
@@ -406,6 +415,7 @@ const FigmaStyleCanvasInternal = () => {
       isAddingComment
     }
   );
+  */
 
   // Get drawing handlers from the interactions
   const drawingHandlers = useMemo(() => {
@@ -465,11 +475,11 @@ const FigmaStyleCanvasInternal = () => {
         
         if (drawingSettingsRef.current.isEraserMode) {
           const eraserRadius = drawingSettingsRef.current.brushSize * 1.5;
-          const toRemove = drawings.filter(d => 
+          const toRemove = drawingsRef.current.filter(d => 
             d.points && d.points.some(p => p && currentPoint && Math.hypot(p.x - currentPoint.x, p.y - currentPoint.y) <= eraserRadius)
           );
           if (toRemove.length > 0) {
-            canvasActions.setDrawings(drawings.filter(d => !toRemove.includes(d)));
+            canvasActions.setDrawings(drawingsRef.current.filter(d => !toRemove.includes(d)));
           }
           return;
         }
@@ -516,7 +526,7 @@ const FigmaStyleCanvasInternal = () => {
       },
       onDrawingEnd: () => {
         if (drawingSettingsRef.current.isEraserMode) {
-          saveToHistory('Erase Drawings', { drawings: drawings });
+          saveToHistory('Erase Drawings', { drawings: drawingsRef.current });
           return;
         }
         
@@ -533,7 +543,7 @@ const FigmaStyleCanvasInternal = () => {
             style, 
             currentDrawingRef.current.layer
           );
-          const updatedDrawings = [...drawings, drawingData];
+          const updatedDrawings = [...drawingsRef.current, drawingData];
           canvasActions.setDrawings(updatedDrawings);
           saveToHistory('Add Drawing', { drawings: updatedDrawings });
           
@@ -546,9 +556,10 @@ const FigmaStyleCanvasInternal = () => {
         setIsDrawing(false);
       }
     };
-  }, [drawings, canvasActions, saveToHistory, drawingSettings]);
+  }, [canvasActions, saveToHistory, setIsDrawing, setCurrentDrawing]);
 
   // Update control callbacks ref with the actual tool states and handlers
+  // Only include dependencies that affect the callback implementations
   useEffect(() => {
     controlCallbacksRef.current = {
       isAddingComment: () => isAddingComment,
@@ -575,7 +586,10 @@ const FigmaStyleCanvasInternal = () => {
       },
       onCanvasClick: () => {
         uiActions.setEditingComment(null);
-        uiActions.setEditingLabel(null);
+        // Don't clear editing label if a label is selected
+        if (selectedLabelIds.size === 0) {
+          uiActions.setEditingLabel(null);
+        }
       },
       onRectSelectionStart: (startPoint, modifierKeys) => canvasEventHandlers.onRectSelectionStart(startPoint, modifierKeys),
       onRectSelectionMove: (startPoint, currentPoint, modifierKeys) => canvasEventHandlers.onRectSelectionMove(startPoint, currentPoint, modifierKeys),
@@ -585,8 +599,10 @@ const FigmaStyleCanvasInternal = () => {
       onDrawingEnd: drawingHandlers.onDrawingEnd,
       onKeyDown: () => {}
     };
-  }, [isAddingComment, isDrawingMode, isHandToolMode, isAddingLabel, canvasTools.toolBehavior, 
-      canvasTools.areThumbnailsInteractive, uiActions, selectionActions, handleLabelCreate, canvasEventHandlers, drawingHandlers]);
+  }, [isAddingComment, isDrawingMode, isHandToolMode, isAddingLabel, 
+      canvasTools.toolBehavior, canvasTools.areThumbnailsInteractive,
+      handleLabelCreate, selectionActions, uiActions, canvasEventHandlers, 
+      drawingHandlers, selectedLabelIds, thumbnailContainersRef, textLabelContainersRef]);
 
   // Update refs when state changes
   useEffect(() => {
@@ -668,6 +684,18 @@ const FigmaStyleCanvasInternal = () => {
     uiActions.setPendingComment(null);
   }, [pendingCommentPos, canvasActions, uiActions]);
 
+  // Handle channel header creation (shared between YouTube components)
+  const handleCreateChannelHeader = useCallback((channelName) => {
+    console.log('🏢 Creating channel header for:', channelName);
+    const toRemove = textLabels.filter(label => label.metadata?.type === 'channelHeader').map(l => l.id);
+    if (toRemove.length > 0) {
+      console.log('🗑️ Removing existing channel headers:', toRemove);
+      canvasActions.deleteLabels(toRemove);
+    }
+    const channelHeader = canvasActions.addLabel(channelName, { x: 100, y: -20 }, { ...labelSettings, size: 'XL' }, { type: 'channelHeader' });
+    console.log('✅ Channel header created:', channelHeader);
+  }, [textLabels, canvasActions, labelSettings]);
+
   // Handle applying settings to selected labels
   const handleApplySettingsToSelected = useCallback((newSettings) => {
     if (selectedLabelIds.size === 0) return;
@@ -739,6 +767,19 @@ const FigmaStyleCanvasInternal = () => {
   }, []);
 
   const selectedThumbnails = thumbnails.filter(t => selectedIds.has(t.id));
+  
+  // Calculate user-created label count (exclude system-generated channel headers)
+  const userLabels = textLabels.filter(label => label.metadata?.type !== 'channelHeader');
+  const channelHeaders = textLabels.filter(label => label.metadata?.type === 'channelHeader');
+  const userLabelCount = userLabels.length;
+  
+  // Debug logging for label counts
+  console.log('🏷️ Label Count Debug:', {
+    totalLabels: textLabels.length,
+    userLabels: userLabelCount,
+    channelHeaders: channelHeaders.length,
+    allLabels: textLabels.map(l => ({ text: l.text, type: l.metadata?.type || 'user' }))
+  });
 
   return (
     <div className={`relative w-full h-screen overflow-hidden bg-neutral-5 ${draggedComment ? 'no-select' : ''}`}>
@@ -757,7 +798,7 @@ const FigmaStyleCanvasInternal = () => {
         // Label props
         isAddingLabel={isAddingLabel}
         onToggleAddLabel={() => toolActions.toggleLabelMode()}
-        labelCount={textLabels.length}
+        labelCount={userLabelCount}
         
         // Multiplayer props
         isMultiplayerConnected={isMultiplayerConnected}
@@ -868,7 +909,7 @@ const FigmaStyleCanvasInternal = () => {
         activeTool={
           isAddingComment ? 'comment' :
           isDrawingMode ? 'drawing' :
-          isAddingLabel ? 'label' :
+          (isAddingLabel || editingLabel || selectedLabelIds.size > 0) ? 'label' :
           null
         }
         // Comment props
@@ -880,7 +921,7 @@ const FigmaStyleCanvasInternal = () => {
         onDrawingSettingsChange={handleDrawingSettingsChange}
         
         // Label props
-        labelCount={textLabels.length}
+        labelCount={userLabelCount}
         onLabelSettingsChange={canvasActions.updateLabelSettings}
         currentSettings={labelSettings}
         selectedLabelIds={selectedLabelIds}
@@ -907,13 +948,7 @@ const FigmaStyleCanvasInternal = () => {
             try { localStorage.setItem('hasImportedVideos', 'true'); setHasImportedBefore(true); } catch {}
             uiActions.setShowYouTubeImporter(false);
           }}
-          onCreateChannelHeader={(channelName) => {
-            const toRemove = textLabels.filter(label => label.metadata?.type === 'channelHeader').map(l => l.id);
-            if (toRemove.length > 0) {
-              canvasActions.deleteLabels(toRemove);
-            }
-            canvasActions.addLabel(channelName, { x: 100, y: -20 }, { ...labelSettings, size: 'XL' }, { type: 'channelHeader' });
-          }}
+          onCreateChannelHeader={handleCreateChannelHeader}
         />
       )}
 
@@ -925,13 +960,7 @@ const FigmaStyleCanvasInternal = () => {
           canvasActions.importThumbnails(videos);
           try { localStorage.setItem('hasImportedVideos', 'true'); setHasImportedBefore(true); } catch {}
         }}
-        onCreateChannelHeader={(channelName) => {
-          const toRemove = textLabels.filter(label => label.metadata?.type === 'channelHeader').map(l => l.id);
-          if (toRemove.length > 0) {
-            canvasActions.deleteLabels(toRemove);
-          }
-          canvasActions.addLabel(channelName, { x: 100, y: -20 }, { ...labelSettings, size: 'XL' }, { type: 'channelHeader' });
-        }}
+        onCreateChannelHeader={handleCreateChannelHeader}
       />
     </div>
   );

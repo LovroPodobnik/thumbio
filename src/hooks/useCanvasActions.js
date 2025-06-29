@@ -166,16 +166,20 @@ export function useSelectionActions() {
   
   return useMemo(() => ({
     setSelection: (ids) => {
+      // Handle both Set and Array inputs
+      const idsArray = ids instanceof Set ? Array.from(ids) : ids;
       dispatch({
         type: actions.SET_SELECTION,
-        payload: { ids }
+        payload: { ids: idsArray }
       });
     },
     
     setLabelSelection: (ids) => {
+      // Handle both Set and Array inputs
+      const idsArray = ids instanceof Set ? Array.from(ids) : ids;
       dispatch({
         type: actions.SET_LABEL_SELECTION,
-        payload: { ids }
+        payload: { ids: idsArray }
       });
     },
     
@@ -187,13 +191,15 @@ export function useSelectionActions() {
     
     // Combined selection for rectangular selection
     setBothSelections: (thumbnailIds, labelIds) => {
+      const thumbnailIdsArray = thumbnailIds instanceof Set ? Array.from(thumbnailIds) : thumbnailIds;
+      const labelIdsArray = labelIds instanceof Set ? Array.from(labelIds) : labelIds;
       dispatch({
         type: actions.SET_SELECTION,
-        payload: { ids: thumbnailIds }
+        payload: { ids: thumbnailIdsArray }
       });
       dispatch({
         type: actions.SET_LABEL_SELECTION,
-        payload: { ids: labelIds }
+        payload: { ids: labelIdsArray }
       });
     },
     

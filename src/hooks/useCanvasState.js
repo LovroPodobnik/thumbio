@@ -9,20 +9,20 @@ const DEFAULT_LABEL_STYLE = {
 };
 
 export const useCanvasState = () => {
-  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [thumbnailPositions, setThumbnailPositions] = useState({});
   const [comments, setComments] = useState([]);
   const [textLabels, setTextLabels] = useState([]);
   const [labelPositions, setLabelPositions] = useState({});
   const [editingLabel, setEditingLabel] = useState(null);
   const [labelSettings, setLabelSettings] = useState(DEFAULT_LABEL_STYLE);
-  const [selectedLabelIds, setSelectedLabelIds] = useState(new Set());
+  const [selectedLabelIds, setSelectedLabelIds] = useState(() => new Set());
   const [selectedLabelText, setSelectedLabelText] = useState('');
   const [pendingCommentPos, setPendingCommentPos] = useState(null);
   const [draggedComment, setDraggedComment] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [editingComment, setEditingComment] = useState(null);
-  const [lockedThumbnails, setLockedThumbnails] = useState(new Set());
+  const [lockedThumbnails, setLockedThumbnails] = useState(() => new Set());
   const [youtubeThumbnails, setYoutubeThumbnails] = useState([]);
 
   // Drawing state

@@ -429,6 +429,12 @@ export function canvasReducer(state, action) {
     
     // Selection actions
     case 'SET_SELECTION':
+      // Ensure we have a valid payload
+      if (!action.payload || typeof action.payload.ids === 'function') {
+        console.error('Invalid SET_SELECTION payload:', action.payload);
+        return newState;
+      }
+      
       return {
         ...newState,
         selection: {
@@ -438,6 +444,12 @@ export function canvasReducer(state, action) {
       };
     
     case 'SET_LABEL_SELECTION':
+      // Ensure we have a valid payload
+      if (!action.payload || typeof action.payload.ids === 'function') {
+        console.error('Invalid SET_LABEL_SELECTION payload:', action.payload);
+        return newState;
+      }
+      
       const selectedLabelIds = new Set(action.payload.ids || []);
       let selectedLabelText = '';
       

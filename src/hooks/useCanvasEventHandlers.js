@@ -16,6 +16,10 @@ const useCanvasEventHandlers = ({
   textLabelContainersRef,
   selectionRectGraphicsRef,
   
+  // Current state values
+  selectedIds,
+  selectedLabelIds,
+  
   // State setters
   setSelectedIds,
   setSelectedLabelIds,
@@ -99,7 +103,7 @@ const useCanvasEventHandlers = ({
       });
     }
     
-    setSelectedIds(new Set());
+    setSelectedIds([]);
     
     // Clear label selection
     if (textLabelContainersRef.current) {
@@ -110,7 +114,7 @@ const useCanvasEventHandlers = ({
       });
     }
     
-    setSelectedLabelIds(new Set());
+    setSelectedLabelIds([]);
   }, [setSelectedIds, setSelectedLabelIds, thumbnailContainersRef, textLabelContainersRef]);
 
   // Canvas click handler
@@ -153,28 +157,35 @@ const useCanvasEventHandlers = ({
     // Handle thumbnail selection with modifier keys
     const thumbnailIds = intersectingThumbnails.map(t => t.userData?.id).filter(Boolean);
     if (thumbnailIds.length > 0) {
-      setSelectedIds(prev => {
-        const newSelection = new Set(prev);
-        
-        if (modifierKeys.shiftKey) {
-          // Add to selection
-          thumbnailIds.forEach(id => newSelection.add(id));
-        } else if (modifierKeys.metaKey || modifierKeys.ctrlKey) {
-          // Toggle selection
-          thumbnailIds.forEach(id => {
-            if (newSelection.has(id)) {
-              newSelection.delete(id);
-            } else {
-              newSelection.add(id);
-            }
-          });
-        } else {
-          // Replace selection
-          return new Set(thumbnailIds);
-        }
-        
-        return newSelection;
-      });
+      const newSelection = new Set(selectedIds);
+      
+      if (modifierKeys.shiftKey) {
+        // Add to selection
+        thumbnailIds.forEach(id => newSelection.add(id));
+      } else if (modifierKeys.metaKey || modifierKeys.ctrlKey) {
+        // Toggle selection
+        thumbnailIds.forEach(id => {
+          if (newSelection.has(id)) {
+            newSelection.delete(id);
+          } else {
+            newSelection.add(id);
+          }
+        });
+      } else {
+        // Replace selection
+        setSelectedIds(thumbnailIds);
+        // Update visual state immediately
+        thumbnailContainersRef.current.forEach(container => {
+          const isSelected = thumbnailIds.includes(container.userData?.id);
+          container.selected = isSelected;
+          if (container.selectionOutline) {
+            container.selectionOutline.visible = isSelected;
+          }
+        });
+        return; // Early return for replace selection
+      }
+      
+      setSelectedIds(Array.from(newSelection));
       
       // Update visual state immediately
       thumbnailContainersRef.current.forEach(container => {
@@ -189,25 +200,25 @@ const useCanvasEventHandlers = ({
     // Handle label selection
     const labelIds = intersectingLabels.map(l => l.labelData?.id).filter(Boolean);
     if (labelIds.length > 0) {
-      setSelectedLabelIds(prev => {
-        const newSelection = new Set(prev);
-        
-        if (modifierKeys.shiftKey) {
-          labelIds.forEach(id => newSelection.add(id));
-        } else if (modifierKeys.metaKey || modifierKeys.ctrlKey) {
-          labelIds.forEach(id => {
-            if (newSelection.has(id)) {
-              newSelection.delete(id);
-            } else {
-              newSelection.add(id);
-            }
-          });
-        } else {
-          return new Set(labelIds);
-        }
-        
-        return newSelection;
-      });
+      const newLabelSelection = new Set(selectedLabelIds);
+      
+      if (modifierKeys.shiftKey) {
+        labelIds.forEach(id => newLabelSelection.add(id));
+      } else if (modifierKeys.metaKey || modifierKeys.ctrlKey) {
+        labelIds.forEach(id => {
+          if (newLabelSelection.has(id)) {
+            newLabelSelection.delete(id);
+          } else {
+            newLabelSelection.add(id);
+          }
+        });
+      } else {
+        // Replace selection
+        setSelectedLabelIds(labelIds);
+        return; // Early return for replace selection
+      }
+      
+      setSelectedLabelIds(Array.from(newLabelSelection));
     }
     
     // If nothing was selected and no modifier keys, clear all selections
@@ -219,7 +230,7 @@ const useCanvasEventHandlers = ({
           container.selectionOutline.visible = false;
         }
       });
-      setSelectedIds(new Set());
+      setSelectedIds([]);
       
       // Clear all label selections
       if (textLabelContainersRef.current) {
@@ -230,7 +241,7 @@ const useCanvasEventHandlers = ({
           }
         });
       }
-      setSelectedLabelIds(new Set());
+      setSelectedLabelIds([]);
     }
     
     // Clean up
@@ -245,6 +256,8 @@ const useCanvasEventHandlers = ({
     viewportRef,
     thumbnailContainersRef,
     textLabelContainersRef,
+    selectedIds,
+    selectedLabelIds,
     setSelectedIds,
     setSelectedLabelIds,
     setIsRectSelecting,
@@ -323,7 +336,7 @@ const useCanvasEventHandlers = ({
             const allIds = thumbnailContainersRef.current
               .map(container => container.userData?.id)
               .filter(Boolean);
-            setSelectedIds(new Set(allIds));
+            setSelectedIds(allIds);
           }
           break;
       }

@@ -72,7 +72,7 @@ export const usePixiRenderer = (
             } else {
               newSelectedIds.add(id);
             }
-            setSelectedIds(newSelectedIds);
+            setSelectedIds(Array.from(newSelectedIds));
           } else {
             // Single-select logic
             // If it's already the only selected item, do nothing.
@@ -81,7 +81,7 @@ export const usePixiRenderer = (
             }
             
             // Otherwise, select only this one.
-            setSelectedIds(new Set([id]));
+            setSelectedIds([id]);
           }
         },
         onDragStart: (dragContainer, e) => {
@@ -202,13 +202,13 @@ export const usePixiRenderer = (
           if (event.shiftKey || event.metaKey) {
             selectedContainer.selected = !selectedContainer.selected;
             if (selectedContainer.selected) {
-              setSelectedLabelIds(prev => new Set([...prev, selectedContainer.labelData.id]));
+              const newSet = new Set(selectedLabelIds);
+              newSet.add(selectedContainer.labelData.id);
+              setSelectedLabelIds(Array.from(newSet));
             } else {
-              setSelectedLabelIds(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(selectedContainer.labelData.id);
-                return newSet;
-              });
+              const newSet = new Set(selectedLabelIds);
+              newSet.delete(selectedContainer.labelData.id);
+              setSelectedLabelIds(Array.from(newSet));
             }
           } else if (!selectedContainer.selected) {
             textLabelContainersRef.current.forEach(c => {
@@ -217,7 +217,7 @@ export const usePixiRenderer = (
               c.hoverBg.visible = false;
             });
             selectedContainer.selected = true;
-            setSelectedLabelIds(new Set([selectedContainer.labelData.id]));
+                          setSelectedLabelIds([selectedContainer.labelData.id]);
           }
           selectedContainer.selectionOutline.visible = selectedContainer.selected;
           selectedContainer.hoverBg.visible = false;
@@ -231,7 +231,7 @@ export const usePixiRenderer = (
             });
             dragContainer.selected = true;
             dragContainer.selectionOutline.visible = true;
-            setSelectedLabelIds(new Set([dragContainer.labelData.id]));
+            setSelectedLabelIds([dragContainer.labelData.id]);
           }
           const selectedContainers = textLabelContainersRef.current.filter(c => c.selected);
           const dragData = {
