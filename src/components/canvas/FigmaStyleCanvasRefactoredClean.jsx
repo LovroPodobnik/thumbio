@@ -311,6 +311,7 @@ const FigmaStyleCanvasInternal = () => {
   // Handle label creation (defined after tools to access isAddingLabel and toolActions)
   const handleLabelCreate = useCallback((pos) => {
     console.log('📝 Creating new label at position:', pos);
+    console.log('📞 handleLabelCreate called from:', new Error().stack);
     const newLabel = canvasActions.addLabel('New Section', pos, labelSettings);
     console.log('✅ Label created:', newLabel);
     uiActions.setEditingLabel(newLabel);
@@ -339,7 +340,6 @@ const FigmaStyleCanvasInternal = () => {
 
   // Initialize canvas interactions hook (includes drawing handlers)
   // TODO: This is redundant with controlsConfig in usePixiAppInitialization - investigate removal
-  /*
   useCanvasInteractions(
     appRef,
     viewportRef,
@@ -359,20 +359,20 @@ const FigmaStyleCanvasInternal = () => {
       setPendingCommentPos: uiActions.setPendingComment,
       isAddingCommentRef,
       
-      // Drawing
-      isDrawingModeRef,
+      // Drawing - disable in this hook to prevent conflicts with controlsConfig
+      isDrawingModeRef: { current: false }, // Always false to disable drawing here
       drawingSettingsRef,
       drawingsRef,
-      setCurrentDrawing,
+      setCurrentDrawing: () => {}, // Disable
       currentDrawingRef,
-      setDrawings: canvasActions.setDrawings,
-      setIsDrawing,
+      setDrawings: () => {}, // Disable
+      setIsDrawing: () => {}, // Disable
       
       // Tools
       isHandToolModeRef,
       canvasTools,
       isAddingLabelRef,
-      handleLabelCreate,
+      handleLabelCreate: () => {}, // Disable label creation in this hook to prevent duplicates
       isSpacePanningRef,
       
       // Selections
@@ -415,20 +415,22 @@ const FigmaStyleCanvasInternal = () => {
       isAddingComment
     }
   );
-  */
 
   // Get drawing handlers from the interactions
   const drawingHandlers = useMemo(() => {
-    if (!appRef.current || !viewportRef.current || !tempDrawingGraphicsRef.current) {
-      return {
-        onDrawingStart: () => {},
-        onDrawingMove: () => {},
-        onDrawingEnd: () => {}
-      };
-    }
-
     return {
       onDrawingStart: (startPoint) => {
+        console.log('🎨 drawingHandlers.onDrawingStart called');
+        if (!appRef.current || !viewportRef.current || !tempDrawingGraphicsRef.current) {
+          console.warn('🎨 Drawing refs not ready:', {
+            app: !!appRef.current,
+            viewport: !!viewportRef.current, 
+            tempGraphics: !!tempDrawingGraphicsRef.current
+          });
+          return;
+        }
+        
+        console.log('🎨 Drawing Start:', startPoint);
         // Validate parameters
         if (!startPoint || typeof startPoint.x === 'undefined' || typeof startPoint.y === 'undefined') {
           console.warn('Invalid startPoint in onDrawingStart:', startPoint);
@@ -447,6 +449,7 @@ const FigmaStyleCanvasInternal = () => {
           }
           return;
         }
+        console.log('🎨 Setting isDrawing to true');
         setIsDrawing(true);
         const style = { 
           color: parseInt(drawingSettingsRef.current.brushColor.replace('#', '0x')), 
@@ -461,11 +464,17 @@ const FigmaStyleCanvasInternal = () => {
           layer: 'over_thumbnails', 
           style 
         };
+        console.log('🎨 Creating newDrawing:', newDrawing);
         setCurrentDrawing(newDrawing);
         currentDrawingRef.current = newDrawing;
       },
       onDrawingMove: (startPoint, currentPoint) => {
-        if (!tempDrawingGraphicsRef.current) return;
+        console.log('🎨 drawingHandlers.onDrawingMove called');
+        if (!appRef.current || !viewportRef.current || !tempDrawingGraphicsRef.current) {
+          console.warn('🎨 Drawing refs not ready for move');
+          return;
+        }
+        console.log('🎨 Drawing Move:', { startPoint, currentPoint });
         
         // Validate parameters
         if (!currentPoint || typeof currentPoint.x === 'undefined' || typeof currentPoint.y === 'undefined') {
@@ -525,12 +534,19 @@ const FigmaStyleCanvasInternal = () => {
         }
       },
       onDrawingEnd: () => {
+        console.log('🎨 drawingHandlers.onDrawingEnd called');
+        if (!appRef.current || !viewportRef.current || !tempDrawingGraphicsRef.current) {
+          console.warn('🎨 Drawing refs not ready for end');
+          return;
+        }
+        console.log('🎨 Drawing End');
         if (drawingSettingsRef.current.isEraserMode) {
           saveToHistory('Erase Drawings', { drawings: drawingsRef.current });
           return;
         }
         
         if (currentDrawingRef.current && currentDrawingRef.current.points.length > 1) {
+          console.log('🎨 Finalizing drawing with', currentDrawingRef.current.points.length, 'points');
           const finalPoints = smoothPath(currentDrawingRef.current.points, 2);
           const style = { 
             color: parseInt(drawingSettingsRef.current.brushColor.replace('#', '0x')), 
@@ -544,12 +560,15 @@ const FigmaStyleCanvasInternal = () => {
             currentDrawingRef.current.layer
           );
           const updatedDrawings = [...drawingsRef.current, drawingData];
+          console.log('🎨 Adding drawing to state, total drawings:', updatedDrawings.length);
           canvasActions.setDrawings(updatedDrawings);
           saveToHistory('Add Drawing', { drawings: updatedDrawings });
           
           if (tempDrawingGraphicsRef.current) {
             tempDrawingGraphicsRef.current.clear();
           }
+        } else {
+          console.log('🎨 Drawing too short, not saving. Points:', currentDrawingRef.current?.points?.length || 0);
         }
         setCurrentDrawing(null);
         currentDrawingRef.current = null;
@@ -594,9 +613,20 @@ const FigmaStyleCanvasInternal = () => {
       onRectSelectionStart: (startPoint, modifierKeys) => canvasEventHandlers.onRectSelectionStart(startPoint, modifierKeys),
       onRectSelectionMove: (startPoint, currentPoint, modifierKeys) => canvasEventHandlers.onRectSelectionMove(startPoint, currentPoint, modifierKeys),
       onRectSelectionEnd: (startPoint, endPoint, modifierKeys) => canvasEventHandlers.onRectSelectionEnd(startPoint, endPoint, modifierKeys),
-      onDrawingStart: drawingHandlers.onDrawingStart,
-      onDrawingMove: drawingHandlers.onDrawingMove,
-      onDrawingEnd: drawingHandlers.onDrawingEnd,
+      onDrawingStart: (startPoint) => {
+        console.log('🎯 controlCallbacksRef.onDrawingStart called with:', startPoint);
+        console.log('🎯 drawingHandlers object:', drawingHandlers);
+        console.log('🎯 drawingHandlers.onDrawingStart type:', typeof drawingHandlers.onDrawingStart);
+        return drawingHandlers.onDrawingStart(startPoint);
+      },
+      onDrawingMove: (startPoint, currentPoint) => {
+        console.log('🎯 controlCallbacksRef.onDrawingMove called');
+        return drawingHandlers.onDrawingMove(startPoint, currentPoint);
+      },
+      onDrawingEnd: () => {
+        console.log('🎯 controlCallbacksRef.onDrawingEnd called');
+        return drawingHandlers.onDrawingEnd();
+      },
       onKeyDown: (e) => {
         // Skip if user is typing
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -874,13 +904,15 @@ const FigmaStyleCanvasInternal = () => {
   const channelHeaders = textLabels.filter(label => label.metadata?.type === 'channelHeader');
   const userLabelCount = userLabels.length;
   
-  // Debug logging for label counts
-  console.log('🏷️ Label Count Debug:', {
-    totalLabels: textLabels.length,
-    userLabels: userLabelCount,
-    channelHeaders: channelHeaders.length,
-    allLabels: textLabels.map(l => ({ text: l.text, type: l.metadata?.type || 'user' }))
-  });
+  // Debug logging for label counts (only log when count changes)
+  React.useEffect(() => {
+    console.log('🏷️ Label Count Debug:', {
+      totalLabels: textLabels.length,
+      userLabels: userLabelCount,
+      channelHeaders: channelHeaders.length,
+      allLabels: textLabels.map(l => ({ text: l.text, type: l.metadata?.type || 'user' }))
+    });
+  }, [textLabels.length, userLabelCount]);
 
   return (
     <div className={`relative w-full h-screen overflow-hidden bg-neutral-5 ${draggedComment ? 'no-select' : ''}`}>
@@ -893,7 +925,10 @@ const FigmaStyleCanvasInternal = () => {
         
         // Drawing props
         isDrawingMode={isDrawingMode}
-        onToggleDrawingMode={() => toolActions.toggleDrawingMode()}
+        onToggleDrawingMode={() => {
+          console.log('🎨 Toggle drawing mode, current state:', isDrawingMode);
+          toolActions.toggleDrawingMode();
+        }}
         drawingCount={drawings.length}
         
         // Label props

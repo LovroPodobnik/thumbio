@@ -119,6 +119,13 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
   
   // Store event handler references for cleanup
   const handlePointerDown = (e) => {
+    console.log('🎯 CanvasControls: Pointer down detected, checking tool states:', {
+      isDrawingMode: isDrawingMode ? isDrawingMode() : 'no function',
+      isHandToolMode: isHandToolMode ? isHandToolMode() : 'no function',
+      target: e.target.constructor.name,
+      isStage: e.target === app.stage
+    });
+    
     // Handle hand tool mode FIRST - should work regardless of what was clicked
     if (isHandToolMode && isHandToolMode()) {
       isPanning = true;
@@ -143,6 +150,7 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
     if (e.target === app.stage) {
       // Handle drawing mode
       if (isDrawingMode && isDrawingMode() && !isSpacePanning) {
+        console.log('🎨 CanvasControls: Drawing mode detected, starting draw');
         const globalPos = e.global;
         const localPos = viewport.toLocal(globalPos);
         
@@ -150,7 +158,10 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
         drawingStartPoint = { x: localPos.x, y: localPos.y };
         
         if (onDrawingStart) {
+          console.log('🎨 CanvasControls: Calling onDrawingStart with:', localPos);
           onDrawingStart(localPos, e.originalEvent || e);
+        } else {
+          console.warn('🎨 CanvasControls: onDrawingStart callback is missing!');
         }
         return;
       }
