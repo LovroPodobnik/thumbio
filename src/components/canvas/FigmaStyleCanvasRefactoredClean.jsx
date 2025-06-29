@@ -597,12 +597,113 @@ const FigmaStyleCanvasInternal = () => {
       onDrawingStart: drawingHandlers.onDrawingStart,
       onDrawingMove: drawingHandlers.onDrawingMove,
       onDrawingEnd: drawingHandlers.onDrawingEnd,
-      onKeyDown: () => {}
+      onKeyDown: (e) => {
+        // Skip if user is typing
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          if (editingLabel) return;
+          
+          const selectedThumbnails = thumbnailContainersRef.current.filter(c => c.selected);
+          const selectedLabels = textLabelContainersRef.current.filter(c => c.selected);
+          
+          if (selectedThumbnails.length > 0 || selectedLabels.length > 0) {
+            const historyData = {};
+            let action = '';
+            
+            if (selectedThumbnails.length > 0) {
+              const deletedIds = selectedThumbnails.map(c => c.userData.id);
+              selectedThumbnails.forEach(c => viewportRef.current.removeChild(c));
+              thumbnailContainersRef.current = thumbnailContainersRef.current.filter(c => !c.selected);
+              const updated = youtubeThumbnails.filter(t => !deletedIds.includes(t.id));
+              canvasActions.importThumbnails(updated);
+              selectionActions.clearSelection();
+              historyData.youtubeThumbnails = updated;
+              action = 'Delete Thumbnails';
+            }
+            
+            if (selectedLabels.length > 0) {
+              const deletedIds = selectedLabels.map(c => c.labelData.id);
+              selectedLabels.forEach(c => viewportRef.current.removeChild(c));
+              textLabelContainersRef.current = textLabelContainersRef.current.filter(c => !c.selected);
+              const updated = textLabels.filter(l => !deletedIds.includes(l.id));
+              canvasActions.setTextLabels(updated);
+              selectionActions.clearLabelSelection();
+              historyData.textLabels = updated;
+              const updatedPos = { ...labelPositions };
+              deletedIds.forEach(id => delete updatedPos[id]);
+              canvasActions.updateLabelPositions(updatedPos);
+              historyData.labelPositions = updatedPos;
+              action = action ? 'Delete Thumbnails & Labels' : 'Delete Labels';
+            }
+            
+            if (action) saveToHistory(action, historyData);
+          }
+        }
+        
+        // Select all
+        if (e.key === 'a' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          thumbnailContainersRef.current.forEach(c => { 
+            c.selected = true; 
+            c.selectionOutline.visible = true; 
+          });
+          selectionActions.setSelection(thumbnailContainersRef.current.map(c => c.userData.id));
+          textLabelContainersRef.current.forEach(c => { 
+            c.selected = true; 
+            c.selectionOutline.visible = true; 
+          });
+          selectionActions.setLabelSelection(textLabelContainersRef.current.map(c => c.labelData.id));
+        }
+        
+        // Escape key
+        if (e.key === 'Escape') {
+          thumbnailContainersRef.current.forEach(c => { 
+            c.selected = false; 
+            c.selectionOutline.visible = false; 
+          });
+          selectionActions.clearSelection();
+          textLabelContainersRef.current.forEach(c => { 
+            c.selected = false; 
+            c.selectionOutline.visible = false; 
+            c.hoverBg.visible = false; 
+          });
+          selectionActions.clearLabelSelection();
+          if (isAddingComment) toolActions.selectSelectionTool();
+          uiActions.setPendingComment(null);
+          uiActions.setEditingComment(null);
+          uiActions.setEditingLabel(null);
+        }
+        
+        // Tool shortcuts (without modifiers)
+        if (!e.metaKey && !e.ctrlKey) {
+          if (e.key === 'c') toolActions.toggleCommentMode();
+          if (e.key === 'p') toolActions.toggleDrawingMode();
+          if (e.key === 't') toolActions.toggleLabelMode();
+          if (e.key === 'v') toolActions.selectSelectionTool();
+          if (e.key === 'h') toolActions.selectHandTool();
+          if (e.key === '=' || e.key === '+') zoomActions.zoomIn();
+          if (e.key === '-') zoomActions.zoomOut();
+          if (e.key === '0') zoomActions.zoomToFit();
+        }
+        
+        // Undo/Redo
+        if (e.key === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey) { 
+          e.preventDefault(); 
+          undo(); 
+        }
+        if (e.key === 'z' && (e.metaKey || e.ctrlKey) && e.shiftKey) { 
+          e.preventDefault(); 
+          redo(); 
+        }
+      }
     };
   }, [isAddingComment, isDrawingMode, isHandToolMode, isAddingLabel, 
       canvasTools.toolBehavior, canvasTools.areThumbnailsInteractive,
       handleLabelCreate, selectionActions, uiActions, canvasEventHandlers, 
-      drawingHandlers, selectedLabelIds, thumbnailContainersRef, textLabelContainersRef]);
+      drawingHandlers, selectedLabelIds, thumbnailContainersRef, textLabelContainersRef,
+      editingLabel, youtubeThumbnails, textLabels, labelPositions, canvasActions,
+      toolActions, zoomActions, undo, redo, saveToHistory, viewportRef]);
 
   // Update refs when state changes
   useEffect(() => {
