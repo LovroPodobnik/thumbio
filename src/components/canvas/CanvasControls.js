@@ -117,7 +117,8 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
   app.stage.eventMode = 'static';
   app.stage.hitArea = app.screen;
   
-  app.stage.on('pointerdown', (e) => {
+  // Store event handler references for cleanup
+  const handlePointerDown = (e) => {
     // Handle hand tool mode FIRST - should work regardless of what was clicked
     if (isHandToolMode && isHandToolMode()) {
       isPanning = true;
@@ -166,7 +167,9 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
       if (callbacks.isAddingLabel && callbacks.isAddingLabel()) {
         const globalPos = e.global;
         const localPos = viewport.toLocal(globalPos);
-        if (callbacks.onAddLabel) callbacks.onAddLabel({ x: localPos.x, y: localPos.y });
+        if (callbacks.onAddLabel) {
+          callbacks.onAddLabel({ x: localPos.x, y: localPos.y });
+        }
         return;
       }
       
@@ -204,9 +207,9 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
         }
       }
     }
-  });
+  };
   
-  app.stage.on('pointermove', (e) => {
+  const handlePointerMove = (e) => {
     // Handle drawing
     if (isDrawing) {
       const globalPos = e.global;
@@ -245,9 +248,9 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
         onRectSelectionMove(rectSelectionStart, localPos, originalEvent);
       }
     }
-  });
+  };
   
-  app.stage.on('pointerup', (e) => {
+  const handlePointerUp = (e) => {
     // Handle drawing end
     if (isDrawing) {
       const globalPos = e.global;
@@ -288,9 +291,9 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
       
       isRectSelecting = false;
     }
-  });
+  };
   
-  app.stage.on('pointerupoutside', (e) => {
+  const handlePointerUpOutside = (e) => {
     // Handle drawing end
     if (isDrawing) {
       const globalPos = e.global;
@@ -331,7 +334,13 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
       
       isRectSelecting = false;
     }
-  });
+  };
+  
+  // Add event listeners
+  app.stage.on('pointerdown', handlePointerDown);
+  app.stage.on('pointermove', handlePointerMove);
+  app.stage.on('pointerup', handlePointerUp);
+  app.stage.on('pointerupoutside', handlePointerUpOutside);
   
   // Zoom with mouse wheel - RAF batched
   let wheelRAF = null;
@@ -456,6 +465,14 @@ export const setupCanvasControls = (app, viewport, gridGraphics, callbacks) => {
     if (wheelRAF) {
       cancelAnimationFrame(wheelRAF);
     }
+    
+    // Remove stage event listeners
+    app.stage.off('pointerdown', handlePointerDown);
+    app.stage.off('pointermove', handlePointerMove);
+    app.stage.off('pointerup', handlePointerUp);
+    app.stage.off('pointerupoutside', handlePointerUpOutside);
+    
+    // Remove window and canvas event listeners
     window.removeEventListener('resize', handleResize);
     window.removeEventListener('keydown', handleKeyDown);
     window.removeEventListener('keyup', handleKeyUp);
