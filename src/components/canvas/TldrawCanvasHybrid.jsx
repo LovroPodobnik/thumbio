@@ -264,18 +264,47 @@ const TldrawCanvasHybrid = () => {
               id: video.id,
               snippet: video.snippet,
               statistics: video.statistics,
+              metrics: video.metrics,
               fullVideo: video
             });
             
             // Handle different possible data structures
             const videoId = video.id?.videoId || video.id || video.videoId || `video-${index}`;
             const snippet = video.snippet || video;
-            const statistics = video.statistics || {};
+            
+            // Try to get statistics from multiple possible locations
+            const statistics = video.statistics || video.metrics || {};
+            
+            // For formatted videos from youtubeApi.js, metrics might be nested
+            const metricsData = video.metrics || {};
+            const finalStats = {
+              viewCount: statistics.viewCount || metricsData.viewCount || '0',
+              likeCount: statistics.likeCount || metricsData.likeCount || '0',
+              commentCount: statistics.commentCount || metricsData.commentCount || '0'
+            };
+            
+            console.log('Final statistics for processing:', {
+              videoId,
+              finalStats,
+              originalStats: statistics,
+              originalMetrics: metricsData
+            });
             
             if (!videoId) {
               console.error('No video ID found for video:', video);
               return null;
             }
+            
+            const views = parseViewCount(finalStats.viewCount);
+            const engagement = calculateEngagement(finalStats);
+            
+            console.log('Calculated metrics:', {
+              videoId,
+              title: snippet.title,
+              views,
+              engagement,
+              rawViewCount: finalStats.viewCount
+            });
             
             return {
               id: createShapeId(`youtube-${videoId}`),
@@ -287,10 +316,10 @@ const TldrawCanvasHybrid = () => {
                 title: snippet.title || 'Unknown Title',
                 thumbnailUrl: getBestThumbnailUrl(video),
                 channelName: snippet.channelTitle || snippet.channelName || 'Unknown Channel',
-                views: parseViewCount(statistics?.viewCount),
-                engagement: calculateEngagement(statistics),
-                isViral: isVideoViral(statistics),
-                zScore: calculateZScore(statistics),
+                views: views,
+                engagement: engagement,
+                isViral: isVideoViral(finalStats),
+                zScore: calculateZScore(finalStats),
                 w: 320,
                 h: 180,
                 locked: false,
