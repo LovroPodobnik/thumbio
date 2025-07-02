@@ -330,3 +330,296 @@ const visibleItems = useMemo(() =>
   [items, viewport]
 );
 ```
+
+## ⚠️ Critical Architecture Rules - MUST FOLLOW
+
+### 🚨 Golden Rules That Can Break Everything
+
+#### 1. **NEVER Allow Dual Control Systems**
+**❌ CATASTROPHIC**: Having multiple `setupCanvasControls` calls active simultaneously
+```javascript
+// DANGER - Both systems will conflict:
+// System 1: usePixiAppInitialization.js
+setupCanvasControls(app, viewport, gridSprite, controlsConfig);
+// System 2: useCanvasInteractions.js  
+setupCanvasControls(app, viewport, gridGraphicsRef.current, callbacks);
+
+// Result: Duplicate events, broken tools, performance issues
+```
+
+**✅ RULE**: Only ONE control system active at a time. If adding new canvas features, verify no duplicate `setupCanvasControls` calls exist.
+
+#### 2. **ALWAYS Check Refs Before Using in Handlers**
+**❌ BREAKS FEATURES**: Static ref checking that creates permanent dead functions
+```javascript
+// WRONG - Gets fallback if refs aren't ready during init
+const handlers = useMemo(() => {
+  if (!appRef.current) return { onClick: () => {} }; // DEAD FOREVER!
+  return { onClick: realHandler };
+}, []);
+```
+
+**✅ RULE**: Dynamic ref checking in every handler
+```javascript
+// CORRECT - Check refs every time handler is called
+const handlers = useMemo(() => ({
+  onClick: () => {
+    if (!appRef.current || !viewportRef.current) {
+      console.warn('Refs not ready'); return;
+    }
+    // Real logic here
+  }
+}), []);
+```
+
+#### 3. **ALWAYS Use Lazy State Initialization**
+**❌ PERFORMANCE KILLER**: Creates new objects on every render
+```javascript
+const [selectedIds, setSelectedIds] = useState(new Set()); // WRONG!
+```
+
+**✅ RULE**: Lazy initialization for all Set/Map/Object states
+```javascript
+const [selectedIds, setSelectedIds] = useState(() => new Set()); // CORRECT!
+```
+
+#### 4. **NEVER Mix useState Function Patterns with Context**
+**❌ BREAKS STATE**: Function update patterns don't work with context actions
+```javascript
+// WRONG - Breaks with context state management
+setSelectedIds(prev => [...prev, newId]);
+```
+
+**✅ RULE**: Always use context actions for state updates
+```javascript
+// CORRECT - Use context actions directly
+selectionActions.setSelection([...selectedIds, newId]);
+```
+
+#### 5. **NEVER Put Objects/Props in useEffect Dependencies**
+**❌ PERFORMANCE DESTROYER**: Causes infinite re-renders
+```javascript
+// WRONG - props object changes every render
+useEffect(() => {
+  expensiveCanvasSetup();
+}, [props, handlers, state]);
+```
+
+**✅ RULE**: Extract specific primitive values
+```javascript
+// CORRECT - Only specific values that actually matter
+const { width, height, isEnabled } = props;
+useEffect(() => {
+  expensiveCanvasSetup();
+}, [width, height, isEnabled]);
+```
+
+### 🔧 Critical Integration Points That Must Stay Synchronized
+
+#### Tool System Coordination (All Must Be In Sync)
+```javascript
+// These MUST all reflect the same state:
+1. useToolState.activeTool
+2. useToolInteractionManager.toolBehavior  
+3. Canvas event routing in CanvasControls.js
+4. UI button states in TopToolbar.jsx
+
+// If ANY are out of sync = broken tools
+```
+
+#### PixiJS Lifecycle Order (NEVER Change This Sequence)
+```javascript
+// CRITICAL ORDER - Don't reorder or skip steps:
+1. Create PIXI app (usePixiAppInitialization)
+2. Initialize viewport 
+3. Setup graphics refs (drawing, selection, etc.)
+4. Setup canvas controls
+5. Connect to React state
+6. Start rendering loops
+```
+
+#### Event Handler Chain (All Links Must Work)
+```javascript
+// CRITICAL FLOW - If ANY link breaks, feature stops working:
+User Input → CanvasControls → controlCallbacksRef → Real Handlers → State Updates → PixiJS Render
+```
+
+### 🚨 Emergency Debug Patterns
+
+#### When Any Tool Stops Working:
+```javascript
+// 1. Check tool state synchronization
+console.log('Tool Debug:', {
+  activeTool: canvasTools.activeTool,
+  isDrawingMode: canvasTools.isDrawingMode,
+  toolBehavior: canvasTools.toolBehavior,
+  eventTarget: e.target === app.stage
+});
+
+// 2. Verify control system health
+console.log('Control Systems:', {
+  useCanvasInteractionsActive: !!useCanvasInteractions,
+  controlsConfigActive: !!controlsConfig,
+  duplicateControls: 'CHECK FOR MULTIPLE setupCanvasControls CALLS'
+});
+```
+
+#### When Performance Degrades:
+```javascript
+// Check for object recreation cascades
+const renderCount = useRef(0);
+renderCount.current++;
+if (renderCount.current > 10) {
+  console.warn('Excessive re-renders detected:', renderCount.current);
+}
+```
+
+#### When State Gets Out of Sync:
+```javascript
+// Verify context vs local state alignment
+console.log('State Sync Check:', {
+  contextData: useCanvasState(),
+  localData: useState_values,
+  pixiData: refs_and_containers
+});
+```
+
+### 🎯 File-Specific Critical Knowledge
+
+#### `CanvasControls.js` - Event Brain
+- **RULE**: This file routes ALL canvas events. Any new tool MUST be added here.
+- **DANGER**: Modifying event handler priorities can break existing tools.
+
+#### `FigmaStyleCanvasRefactoredClean.jsx` - Integration Hub  
+- **RULE**: This orchestrates everything. Keep integration logic here, not in child components.
+- **DANGER**: Moving control setup logic can break the entire tool system.
+
+#### `useCanvasToolsIntegrated.js` - Tool Coordinator
+- **RULE**: ALL tool state changes must flow through this hub.
+- **DANGER**: Bypassing this for tool state can cause synchronization issues.
+
+#### `canvasState.js` - Single Source of Truth
+- **RULE**: ALL canvas data updates must use these actions.
+- **DANGER**: Direct useState calls bypass the unified state system.
+
+### 🔥 Most Common Break Points
+
+1. **Adding new tool without updating all 4 tool system pieces**
+2. **Creating useEffect with broad object dependencies**  
+3. **Forgetting ref readiness checks in new handlers**
+4. **Accidentally enabling both control systems**
+5. **Using useState patterns instead of context actions**
+
+### ⚡ Quick Fix Emergency Kit
+
+```javascript
+// If tools stop working - Check this first:
+1. Only one setupCanvasControls active? 
+2. All refs ready when handlers run?
+3. Tool state synchronized across all pieces?
+4. Using context actions not useState?
+5. No objects in useEffect dependencies?
+```
+
+**REMEMBER**: This codebase has a complex but powerful architecture. These rules prevent 90% of bugs and performance issues. When in doubt, follow the patterns established in working features.
+
+## Model Context Protocol (MCP) Configuration
+
+### Overview
+This project is configured to use MCP (Model Context Protocol) servers to extend Claude Code's capabilities with external tools and services. MCP enables seamless integration with GitHub, databases, and other development tools.
+
+### GitHub MCP Server Setup
+
+The GitHub MCP Server provides comprehensive GitHub integration including issues, pull requests, repositories, code security, and actions management.
+
+#### Adding GitHub MCP Server
+```bash
+# Add GitHub MCP Server (remote hosted)
+claude mcp add --transport http github https://api.githubcopilot.com/mcp/
+
+# Verify server was added
+claude mcp list
+claude mcp get github
+```
+
+#### Authentication
+1. Use `/mcp` command in Claude Code to manage authentication
+2. Select "Authenticate" for the GitHub server
+3. Complete OAuth flow in your browser
+4. Server becomes active once authenticated
+
+#### Available GitHub Tools
+- **Issues**: Create, update, search, manage issues and comments
+- **Pull Requests**: Create, review, merge, manage PRs and reviews
+- **Repositories**: Browse code, create branches, manage files, search code
+- **Code Security**: Access code scanning and secret scanning alerts
+- **Actions**: Work with GitHub Actions workflows
+- **Notifications**: Manage GitHub notifications
+- **Organizations**: Search and manage organization data
+
+#### Usage Examples
+```bash
+# Common GitHub operations via Claude Code:
+# "List open issues in this repository"
+# "Create a new branch called 'feature/thumbnail-optimization'"
+# "Show me recent pull requests"
+# "What are the latest code security alerts?"
+# "Create an issue for the canvas performance optimization"
+```
+
+### MCP Server Scopes
+
+MCP servers can be configured at different scopes:
+
+- **Local** (default): Private to you in this project
+- **Project**: Shared with team via `.mcp.json` file (committed to repo)
+- **User**: Available across all your projects
+
+```bash
+# Add project-scoped server (shared with team)
+claude mcp add -s project github-shared https://api.githubcopilot.com/mcp/
+
+# Add user-scoped server (personal, cross-project)
+claude mcp add -s user github-personal https://api.githubcopilot.com/mcp/
+```
+
+### MCP Resources and Prompts
+
+#### Using @ Resources
+Reference GitHub resources directly in prompts:
+```
+> Can you analyze @github:issue://123 and suggest a fix?
+> Compare @github:pr://456 with the current canvas implementation
+```
+
+#### Using / Slash Commands
+GitHub MCP prompts become available as slash commands:
+```
+> /mcp__github__list_prs
+> /mcp__github__create_issue "Canvas performance optimization" high
+```
+
+### Security Considerations
+
+- MCP servers run with your GitHub permissions
+- Review server configurations before adding to project scope
+- Use minimal required permissions for GitHub tokens
+- Team members must approve project-scoped servers individually
+
+### Troubleshooting MCP
+
+```bash
+# Check server status
+claude mcp list
+
+# Debug server connection
+/mcp  # Use this command within Claude Code
+
+# Remove problematic server
+claude mcp remove github
+
+# Reset project server approvals
+claude mcp reset-project-choices
+```
+
+For more details about MCP, see the [MCP documentation](https://modelcontextprotocol.io/introduction).

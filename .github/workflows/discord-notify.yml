@@ -1,0 +1,96 @@
+name: Discord Notification on Push
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+
+    - name: Get commit info
+      id: commit
+      run: |
+        echo "message=$(git log -1 --pretty=format:'%s')" >> $GITHUB_OUTPUT
+        echo "author=$(git log -1 --pretty=format:'%an')" >> $GITHUB_OUTPUT
+        echo "sha=$(git log -1 --pretty=format:'%h')" >> $GITHUB_OUTPUT
+        echo "url=${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" >> $GITHUB_OUTPUT
+
+    - name: Send Discord notification
+      if: github.event_name == 'push'
+      run: |
+        curl -H "Content-Type: application/json" \
+             -X POST \
+             -d '{
+               "embeds": [{
+                 "title": "📦 New Push to Repository",
+                 "description": "**Repository:** `${{ github.repository }}`\n**Branch:** `${{ github.ref_name }}`",
+                 "color": 3066993,
+                 "fields": [
+                   {
+                     "name": "💬 Commit Message",
+                     "value": "${{ steps.commit.outputs.message }}",
+                     "inline": false
+                   },
+                   {
+                     "name": "👤 Author",
+                     "value": "${{ steps.commit.outputs.author }}",
+                     "inline": true
+                   },
+                   {
+                     "name": "🔗 Commit",
+                     "value": "[`${{ steps.commit.outputs.sha }}`](${{ steps.commit.outputs.url }})",
+                     "inline": true
+                   }
+                 ],
+                 "timestamp": "${{ github.event.head_commit.timestamp }}",
+                 "footer": {
+                   "text": "GitHub Actions",
+                   "icon_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+                 }
+               }]
+             }' \
+             https://discord.com/api/webhooks/1389959993448464506/Z9_7ZBrIPCGHlIstf9lZga5mp_lceWyuKffhqjepHfuRobxSuYC7rQzSDq8axHsKcAGj
+
+    - name: Send Discord notification for PR
+      if: github.event_name == 'pull_request'
+      run: |
+        curl -H "Content-Type: application/json" \
+             -X POST \
+             -d '{
+               "embeds": [{
+                 "title": "🔀 New Pull Request",
+                 "description": "**Repository:** `${{ github.repository }}`\n**PR:** #${{ github.event.number }}",
+                 "color": 16776960,
+                 "fields": [
+                   {
+                     "name": "📝 Title",
+                     "value": "${{ github.event.pull_request.title }}",
+                     "inline": false
+                   },
+                   {
+                     "name": "👤 Author",
+                     "value": "${{ github.event.pull_request.user.login }}",
+                     "inline": true
+                   },
+                   {
+                     "name": "🔗 View PR",
+                     "value": "[Open Pull Request](${{ github.event.pull_request.html_url }})",
+                     "inline": true
+                   }
+                 ],
+                 "timestamp": "${{ github.event.pull_request.created_at }}",
+                 "footer": {
+                   "text": "GitHub Actions",
+                   "icon_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+                 }
+               }]
+             }' \
+             https://discord.com/api/webhooks/1389959993448464506/Z9_7ZBrIPCGHlIstf9lZga5mp_lceWyuKffhqjepHfuRobxSuYC7rQzSDq8axHsKcAGj
