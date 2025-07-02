@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Tldraw, createShapeId, ShapeUtil, HTMLContainer, T, Rectangle2d } from '@tldraw/tldraw';
 import '@tldraw/tldraw/tldraw.css';
 
@@ -6,12 +6,26 @@ import '@tldraw/tldraw/tldraw.css';
 import MainSidebar from './MainSidebar';
 import ContentImportSidebar from './ContentImportSidebar';
 import YouTubeImporter from './YouTubeImporter';
+import DualSidebar from './DualSidebar';
 
 // Simple YouTube data storage (replace complex state management)
 let youtubeVideos = [];
 let showContentImport = false;
 let showYouTubeImporter = false;
 let sidebarOpen = false; // Start collapsed by default like original
+
+// Debounce utility function
+const debounce = (func, wait) => {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+};
 
 // Simple thumbnail shape props
 const thumbnailShapeProps = {
@@ -30,7 +44,7 @@ const thumbnailShapeProps = {
 };
 
 // YouTube thumbnail component
-const ThumbnailShapeComponent = ({ shape }) => {
+const ThumbnailShapeComponent = ({ shape, editor }) => {
   const { props } = shape;
   const { 
     thumbnailUrl, 
@@ -51,8 +65,21 @@ const ThumbnailShapeComponent = ({ shape }) => {
     return views.toString();
   };
 
+  // Let tldraw handle clicks natively for proper selection behavior
+  
+  // Proper click handler following tldraw patterns
+  const handleThumbnailClick = (e) => {
+    if (!locked && globalEditor) {
+      // Following tldraw documentation: stopPropagation for custom handling
+      e.stopPropagation();
+      globalEditor.select(shape.id);
+    }
+  };
+
   return (
     <div 
+      onClick={handleThumbnailClick}
+      onPointerDown={handleThumbnailClick}
       style={{ 
         width: w, 
         height: h, 
@@ -62,7 +89,8 @@ const ThumbnailShapeComponent = ({ shape }) => {
         overflow: 'hidden',
         backgroundColor: '#f3f4f6',
         cursor: locked ? 'not-allowed' : 'pointer',
-        userSelect: 'none'
+        userSelect: 'none',
+        pointerEvents: 'all' // Enable interactions following tldraw docs
       }}
     >
       <img
@@ -73,7 +101,10 @@ const ThumbnailShapeComponent = ({ shape }) => {
           height: '100%',
           objectFit: 'cover',
           opacity: locked ? 0.6 : 1,
-          pointerEvents: 'none'
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          MozUserSelect: 'none',
+          msUserSelect: 'none'
         }}
         onError={(e) => {
           e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIwIiBoZWlnaHQ9IjE4MCIgdmlld0JveD0iMCAwIDMyMCAxODAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMjAiIGhlaWdodD0iMTgwIiBmaWxsPSIjRkFGQUZBIi8+CjxwYXRoIGQ9Ik0xNDQuNSA5MEwxNjggNzguNVYxMDEuNUwxNDQuNSA5MFoiIGZpbGw9IiM5Q0EzQUYiLz4KPHN2Zz4K';
@@ -86,8 +117,7 @@ const ThumbnailShapeComponent = ({ shape }) => {
           top: '8px',
           right: '8px',
           display: 'flex',
-          gap: '4px',
-          pointerEvents: 'none'
+          gap: '4px'
         }}>
           {isViral && (
             <span style={{
@@ -125,8 +155,7 @@ const ThumbnailShapeComponent = ({ shape }) => {
         background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
         color: 'white',
         padding: '8px',
-        fontSize: '12px',
-        pointerEvents: 'none'
+        fontSize: '12px'
       }}>
         <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>
           {title.length > 40 ? title.substring(0, 40) + '...' : title}
@@ -147,8 +176,7 @@ const ThumbnailShapeComponent = ({ shape }) => {
           padding: '8px 12px',
           borderRadius: '6px',
           fontSize: '12px',
-          fontWeight: 'bold',
-          pointerEvents: 'none'
+          fontWeight: 'bold'
         }}>
           🔒 LOCKED
         </div>
@@ -156,6 +184,9 @@ const ThumbnailShapeComponent = ({ shape }) => {
     </div>
   );
 };
+
+// Global editor reference for shape components
+let globalEditor = null;
 
 // Shape util for tldraw
 class ThumbnailShapeUtil extends ShapeUtil {
@@ -191,7 +222,7 @@ class ThumbnailShapeUtil extends ShapeUtil {
   component(shape) {
     return (
       <HTMLContainer>
-        <ThumbnailShapeComponent shape={shape} />
+        <ThumbnailShapeComponent shape={shape} editor={globalEditor} />
       </HTMLContainer>
     )
   }
@@ -215,18 +246,358 @@ class ThumbnailShapeUtil extends ShapeUtil {
   canBind() {
     return false
   }
+  
+  canSelect(shape) {
+    return !shape.props.locked;
+  }
+  
+  canResize(shape) {
+    return !shape.props.locked
+  }
+  
+  canMove(shape) {
+    return !shape.props.locked
+  }
+
+  // Override hitTestPoint to ensure proper click detection
+  hitTestPoint(shape, point) {
+    return this.getGeometry(shape).hitTestPoint(point);
+  }
+  
+  // Ensure proper hit testing for selection
+  getOutlineSegments(shape) {
+    const { w, h } = shape.props;
+    return [
+      { type: 'straight', x: 0, y: 0 },
+      { type: 'straight', x: w, y: 0 },
+      { type: 'straight', x: w, y: h },
+      { type: 'straight', x: 0, y: h },
+      { type: 'close' }
+    ];
+  }
 }
 
 // Hybrid canvas - combines YouTube import with pure tldraw
 const TldrawCanvasHybrid = () => {
   const [editor, setEditor] = useState(null);
   const [, forceUpdate] = useState({});
+  
+  // Dual sidebar state (Analytics + AI Art Director)
+  const [selectedThumbnailForSidebar, setSelectedThumbnailForSidebar] = useState(null);
+  const [showDualSidebar, setShowDualSidebar] = useState(false);
+  const [dualSidebarWidth, setDualSidebarWidth] = useState(420);
 
   const shapeUtils = useMemo(() => [ThumbnailShapeUtil], []);
 
 
   // Force re-render function
   const refresh = () => forceUpdate({});
+
+  // Helper functions needed for examples (wrapped in useCallback to avoid re-creation)
+  const calculateEngagementForExamples = useCallback((statistics) => {
+    if (!statistics) return 0;
+    const views = parseInt(statistics.viewCount || '0', 10);
+    const likes = parseInt(statistics.likeCount || '0', 10);
+    const comments = parseInt(statistics.commentCount || '0', 10);
+    if (views === 0) return 0;
+    const engagementActions = likes + comments;
+    return Math.round((engagementActions / views) * 100 * 100) / 100;
+  }, []);
+
+  const calculateZScoreForExamples = useCallback((statistics) => {
+    if (!statistics) return 0;
+    const views = parseInt(statistics.viewCount || '0', 10);
+    const engagement = calculateEngagementForExamples(statistics);
+    return Math.round((Math.log10(views + 1) + engagement / 10) * 100) / 100;
+  }, [calculateEngagementForExamples]);
+
+  // Create example thumbnails for testing (saves API calls)
+  const createExampleThumbnails = useCallback((editor) => {
+    if (!editor) return;
+
+    const exampleThumbnails = [
+      // Viral Performance Examples
+      {
+        id: 'example-viral-1',
+        title: 'How I Made $1 Million in 24 Hours (INSANE Story)',
+        channelName: 'MrBeast',
+        thumbnailUrl: 'https://picsum.photos/seed/viral1/320/180', // High energy thumbnail
+        views: 45000000,
+        likes: 2100000,
+        comments: 89000,
+        publishedDaysAgo: 7,
+        duration: '15:32',
+        isViral: true
+      },
+      {
+        id: 'example-viral-2', 
+        title: 'I Survived 100 Days in a Nuclear Bunker',
+        channelName: 'Ryan Trahan',
+        thumbnailUrl: 'https://picsum.photos/seed/viral2/320/180',
+        views: 23000000,
+        likes: 1200000,
+        comments: 45000,
+        publishedDaysAgo: 14,
+        duration: '20:14',
+        isViral: true
+      },
+      // Excellent Performance
+      {
+        id: 'example-excellent-1',
+        title: 'Why Everyone is Quitting YouTube',
+        channelName: 'Veritasium',
+        thumbnailUrl: 'https://picsum.photos/seed/excellent1/320/180',
+        views: 3200000,
+        likes: 185000,
+        comments: 12000,
+        publishedDaysAgo: 21,
+        duration: '18:45',
+        isViral: false
+      },
+      {
+        id: 'example-excellent-2',
+        title: 'The Future of Programming in 2024',
+        channelName: 'Fireship',
+        thumbnailUrl: 'https://picsum.photos/seed/excellent2/320/180',
+        views: 1800000,
+        likes: 95000,
+        comments: 8500,
+        publishedDaysAgo: 30,
+        duration: '8:23',
+        isViral: false
+      },
+      // Good Performance
+      {
+        id: 'example-good-1',
+        title: 'Building a SaaS in Public - Month 6 Update',
+        channelName: 'Indie Hackers',
+        thumbnailUrl: 'https://picsum.photos/seed/good1/320/180',
+        views: 450000,
+        likes: 23000,
+        comments: 1200,
+        publishedDaysAgo: 45,
+        duration: '12:18',
+        isViral: false
+      },
+      {
+        id: 'example-good-2',
+        title: 'React 19 Features You Need to Know',
+        channelName: 'Web Dev Simplified',
+        thumbnailUrl: 'https://picsum.photos/seed/good2/320/180',
+        views: 280000,
+        likes: 18000,
+        comments: 850,
+        publishedDaysAgo: 60,
+        duration: '16:42',
+        isViral: false
+      },
+      // Average Performance
+      {
+        id: 'example-average-1',
+        title: 'Daily Vlog: Coffee Shop Coding Session',
+        channelName: 'Code with Sarah',
+        thumbnailUrl: 'https://picsum.photos/seed/average1/320/180',
+        views: 85000,
+        likes: 3200,
+        comments: 180,
+        publishedDaysAgo: 90,
+        duration: '9:15',
+        isViral: false
+      },
+      {
+        id: 'example-average-2',
+        title: 'CSS Grid Tutorial for Beginners',
+        channelName: 'Frontend Focus',
+        thumbnailUrl: 'https://picsum.photos/seed/average2/320/180',
+        views: 42000,
+        likes: 1800,
+        comments: 95,
+        publishedDaysAgo: 120,
+        duration: '22:30',
+        isViral: false
+      },
+      // Low Performance 
+      {
+        id: 'example-low-1',
+        title: 'My Setup Tour 2024',
+        channelName: 'Tech Corner',
+        thumbnailUrl: 'https://picsum.photos/seed/low1/320/180',
+        views: 8500,
+        likes: 320,
+        comments: 25,
+        publishedDaysAgo: 180,
+        duration: '6:45',
+        isViral: false
+      },
+      {
+        id: 'example-low-2',
+        title: 'Random Thoughts on Programming',
+        channelName: 'DevDiary',
+        thumbnailUrl: 'https://picsum.photos/seed/low2/320/180',
+        views: 3200,
+        likes: 85,
+        comments: 12,
+        publishedDaysAgo: 240,
+        duration: '4:12',
+        isViral: false
+      }
+    ];
+
+    // Convert to tldraw shapes
+    const shapes = exampleThumbnails.map((video, index) => {
+      const engagement = calculateEngagementForExamples({
+        viewCount: video.views,
+        likeCount: video.likes,
+        commentCount: video.comments
+      });
+
+      return {
+        id: createShapeId(`example-${video.id}`),
+        type: 'youtube-thumbnail',
+        x: 150 + (index % 4) * 360,
+        y: 150 + Math.floor(index / 4) * 240,
+        props: {
+          videoId: video.id,
+          title: video.title,
+          thumbnailUrl: video.thumbnailUrl,
+          channelName: video.channelName,
+          views: video.views,
+          engagement: engagement,
+          isViral: video.isViral,
+          zScore: calculateZScoreForExamples({
+            viewCount: video.views,
+            likeCount: video.likes,
+            commentCount: video.comments
+          }),
+          w: 320,
+          h: 180,
+          locked: false,
+          showMetrics: true
+        }
+      };
+    });
+
+    // Create all thumbnail shapes on canvas
+    editor.createShapes(shapes);
+    
+    // Zoom to fit all examples
+    setTimeout(() => {
+      editor.zoomToFit();
+    }, 100);
+  }, [calculateEngagementForExamples, calculateZScoreForExamples]);
+
+  // Enhanced editor mount handler
+  const handleEditorMount = useCallback((editorInstance) => {
+    setEditor(editorInstance);
+    
+    // Set global editor reference for shape components
+    globalEditor = editorInstance;
+    
+    // Ensure we're using the selection tool by default for thumbnail interaction
+    if (editorInstance && editorInstance.setCurrentTool) {
+      editorInstance.setCurrentTool('select');
+    }
+
+    // Add example thumbnails after a short delay to ensure editor is ready
+    setTimeout(() => {
+      createExampleThumbnails(editorInstance);
+    }, 500);
+  }, [createExampleThumbnails]);
+  
+  // Data transformation: Convert tldraw shape to analytics format
+  const convertTldrawShapeToAnalyticsData = useCallback((shape) => {
+    if (!shape || shape.type !== 'youtube-thumbnail') return null;
+    
+    const { props } = shape;
+    
+    // Calculate additional metrics that analytics drawer expects
+    const calculateLikeCount = (engagement, views) => {
+      if (!engagement || !views) return 0;
+      // Rough estimation: engagement includes likes + comments, assume 80% are likes
+      return Math.round((engagement / 100) * views * 0.8);
+    };
+    
+    const calculateCommentCount = (engagement, views) => {
+      if (!engagement || !views) return 0;
+      // Rough estimation: remaining 20% of engagement are comments
+      return Math.round((engagement / 100) * views * 0.2);
+    };
+    
+    const calculatePublishedDaysAgo = () => {
+      // For now, we'll use a default of 30 days
+      // In real implementation, this should come from video data
+      return 30;
+    };
+    
+    return {
+      id: props.videoId,
+      title: props.title || 'Unknown Title',
+      channelName: props.channelName || 'Unknown Channel',
+      channelId: props.channelId || 'unknown',
+      thumbnail: props.thumbnailUrl,
+      thumbnails: {
+        default: { url: props.thumbnailUrl },
+        medium: { url: props.thumbnailUrl },
+        high: { url: props.thumbnailUrl },
+        maxres: { url: props.thumbnailUrl }
+      },
+      publishedAt: new Date(Date.now() - (calculatePublishedDaysAgo() * 24 * 60 * 60 * 1000)).toISOString(),
+      duration: '10:30', // Default duration - should come from video data
+      metrics: {
+        viewCount: props.views || 0,
+        likeCount: calculateLikeCount(props.engagement, props.views),
+        commentCount: calculateCommentCount(props.engagement, props.views),
+        publishedDaysAgo: calculatePublishedDaysAgo()
+      },
+      x: shape.x,
+      y: shape.y
+    };
+  }, []);
+  
+  
+  // Debounced handler only for expensive operations like re-renders
+  const debouncedForceUpdate = useMemo(
+    () => debounce(() => {
+      forceUpdate({});
+    }, 50), // Reduced from 100ms to 50ms for better responsiveness
+    []
+  );
+  
+  // Optimized selection detection for instant sidebar response
+  useEffect(() => {
+    if (!editor) return;
+    
+    const handleSelectionChange = () => {
+      const selectedShapes = editor.getSelectedShapes();
+      const thumbnails = selectedShapes.filter(s => s.type === 'youtube-thumbnail');
+      
+      // Immediate sidebar update for single thumbnail selection
+      if (thumbnails.length === 1) {
+        const sidebarData = convertTldrawShapeToAnalyticsData(thumbnails[0]);
+        setSelectedThumbnailForSidebar(sidebarData);
+        setShowDualSidebar(true);
+      } else {
+        setSelectedThumbnailForSidebar(null);
+        setShowDualSidebar(false);
+      }
+      
+      // Debounced re-render for performance
+      debouncedForceUpdate();
+    };
+    
+    // Use the correct tldraw change event for selection detection
+    editor.on('change', handleSelectionChange);
+    
+    // Initial check
+    handleSelectionChange();
+    
+    // Cleanup event listeners
+    return () => {
+      editor.off('change', handleSelectionChange);
+    };
+  }, [editor, convertTldrawShapeToAnalyticsData, debouncedForceUpdate]);
+  
+  
 
   // Simple mock implementations of the UI actions (replace complex state management)
   const mockUIActions = {
@@ -400,45 +771,15 @@ const TldrawCanvasHybrid = () => {
     return Math.round((Math.log10(views + 1) + engagement / 10) * 100) / 100;
   };
 
-  // Handle thumbnail actions
-  const handleToggleLock = () => {
-    if (!editor) return;
-    const selectedShapes = editor.getSelectedShapes();
-    const thumbnailShapes = selectedShapes.filter(shape => shape.type === 'youtube-thumbnail');
-    if (thumbnailShapes.length === 0) return;
-    
-    const updates = thumbnailShapes.map(shape => ({
-      id: shape.id,
-      type: shape.type,
-      props: { ...shape.props, locked: !shape.props.locked }
-    }));
-    
-    editor.updateShapes(updates);
-  };
 
-  const handleToggleMetrics = () => {
-    if (!editor) return;
-    const selectedShapes = editor.getSelectedShapes();
-    const thumbnailShapes = selectedShapes.filter(shape => shape.type === 'youtube-thumbnail');
-    if (thumbnailShapes.length === 0) return;
-    
-    const updates = thumbnailShapes.map(shape => ({
-      id: shape.id,
-      type: shape.type,
-      props: { ...shape.props, showMetrics: !shape.props.showMetrics }
-    }));
-    
-    editor.updateShapes(updates);
-  };
 
-  // Get selection info
-  const selectedShapes = editor ? editor.getSelectedShapes() : [];
-  const thumbnailShapes = selectedShapes.filter(shape => shape.type === 'youtube-thumbnail');
-
-  // Calculate sidebar offset (matching original logic)
+  // Calculate sidebar offsets (matching original logic)
   const mainSidebarWidth = sidebarOpen ? 240 : 60;
   const contentImportWidth = showContentImport ? 380 : 0;
   const leftOffset = mainSidebarWidth + contentImportWidth;
+  
+  // Dual sidebar is positioned from right
+  const dualSidebarOffsetWidth = showDualSidebar ? 60 : 0; // Always 60px when visible (collapsed or expanded)
 
   return (
     <div className="flex h-screen bg-background-primary">
@@ -479,18 +820,23 @@ const TldrawCanvasHybrid = () => {
       )}
       
       {/* Main canvas area */}
-      <div className="flex-1" style={{ marginLeft: `${leftOffset}px` }}>
+      <div className="flex-1" style={{ 
+        marginLeft: `${leftOffset}px`,
+        marginRight: `${dualSidebarOffsetWidth}px`
+      }}>
         <div className="h-full relative">
           {/* tldraw canvas */}
           <div style={{ position: 'relative', width: '100%', height: '100%' }}>
             <Tldraw 
-              onMount={setEditor}
+              onMount={handleEditorMount}
               shapeUtils={shapeUtils}
               hideUi={false}
               components={{
                 Watermark: () => null, // Remove tldraw watermark
               }}
             />
+            
+            
             {/* Hide tldraw watermark */}
             <style dangerouslySetInnerHTML={{
               __html: `
@@ -504,6 +850,14 @@ const TldrawCanvasHybrid = () => {
           
         </div>
       </div>
+      
+      {/* Dual Sidebar (Analytics + AI Art Director) */}
+      <DualSidebar
+        isVisible={showDualSidebar}
+        thumbnail={selectedThumbnailForSidebar}
+        width={dualSidebarWidth}
+        onWidthChange={setDualSidebarWidth}
+      />
     </div>
   );
 };
