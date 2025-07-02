@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Tldraw, createShapeId, ShapeUtil, HTMLContainer, T, Rectangle2d } from '@tldraw/tldraw';
+import { Tldraw, createShapeId, ShapeUtil, HTMLContainer, T, Rectangle2d, DefaultStylePanel } from '@tldraw/tldraw';
 import '@tldraw/tldraw/tldraw.css';
 
 // Import ONLY the essential YouTube functionality - no complex canvas state
@@ -45,6 +45,8 @@ const thumbnailShapeProps = {
 
 // YouTube thumbnail component
 const ThumbnailShapeComponent = ({ shape, editor }) => {
+  const [currentTool, setCurrentTool] = useState(globalEditor?.getCurrentToolId());
+  
   const { props } = shape;
   const { 
     thumbnailUrl, 
@@ -65,11 +67,28 @@ const ThumbnailShapeComponent = ({ shape, editor }) => {
     return views.toString();
   };
 
-  // Let tldraw handle clicks natively for proper selection behavior
+  // Listen for tool changes to update component reactively
+  useEffect(() => {
+    if (!globalEditor) return;
+    
+    const handleToolChange = () => {
+      setCurrentTool(globalEditor.getCurrentToolId());
+    };
+    
+    // Listen to editor changes for tool switches
+    globalEditor.on('change', handleToolChange);
+    
+    return () => {
+      globalEditor.off('change', handleToolChange);
+    };
+  }, []);
+
+  // Check current tool to determine pointer event behavior
+  const isHandTool = currentTool === 'hand';
   
   // Proper click handler following tldraw patterns
   const handleThumbnailClick = (e) => {
-    if (!locked && globalEditor) {
+    if (!locked && globalEditor && !isHandTool) {
       // Following tldraw documentation: stopPropagation for custom handling
       e.stopPropagation();
       globalEditor.select(shape.id);
@@ -88,9 +107,10 @@ const ThumbnailShapeComponent = ({ shape, editor }) => {
         borderRadius: '8px',
         overflow: 'hidden',
         backgroundColor: '#f3f4f6',
-        cursor: locked ? 'not-allowed' : 'pointer',
+        cursor: locked ? 'not-allowed' : (isHandTool ? 'grab' : 'pointer'),
         userSelect: 'none',
-        pointerEvents: 'all' // Enable interactions following tldraw docs
+        // When hand tool is active, let events pass through to enable canvas panning
+        pointerEvents: isHandTool ? 'none' : 'all'
       }}
     >
       <img
@@ -277,6 +297,11 @@ class ThumbnailShapeUtil extends ShapeUtil {
   }
 }
 
+// Create a factory function for the conditional StylePanel
+const createConditionalStylePanel = (shouldHide) => {
+  return shouldHide ? () => null : DefaultStylePanel;
+};
+
 // Hybrid canvas - combines YouTube import with pure tldraw
 const TldrawCanvasHybrid = () => {
   const [editor, setEditor] = useState(null);
@@ -288,6 +313,12 @@ const TldrawCanvasHybrid = () => {
   const [dualSidebarWidth, setDualSidebarWidth] = useState(420);
 
   const shapeUtils = useMemo(() => [ThumbnailShapeUtil], []);
+
+  // Create components object that hides StylePanel when dual sidebar is visible
+  const tldrawComponents = useMemo(() => ({
+    Watermark: () => null, // Remove tldraw watermark
+    StylePanel: createConditionalStylePanel(showDualSidebar), // Hide StylePanel when dual sidebar is visible
+  }), [showDualSidebar]);
 
 
   // Force re-render function
@@ -831,9 +862,7 @@ const TldrawCanvasHybrid = () => {
               onMount={handleEditorMount}
               shapeUtils={shapeUtils}
               hideUi={false}
-              components={{
-                Watermark: () => null, // Remove tldraw watermark
-              }}
+              components={tldrawComponents}
             />
             
             
