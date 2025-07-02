@@ -2,6 +2,12 @@ import React, { useState } from 'react';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
 import * as Avatar from '@radix-ui/react-avatar';
 import { fetchBestPerformingVideos, fetchChannelVideos } from '../../services/youtubeApi';
+import { 
+  fetchBestPerformingTikToks, 
+  fetchUserTikToks, 
+  fetchTrendingTikToks,
+  popularTikTokCreators 
+} from '../../services/tiktokApiWrapper';
 import { cn } from '../../lib/utils';
 import { 
   X, 
@@ -81,7 +87,15 @@ const ContentImportSidebar = ({
     setImportingChannel(channelHandle);
     
     try {
-      const result = await fetchBestPerformingVideos(channelHandle, 50);
+      let result;
+      
+      // Call appropriate API based on selected platform
+      if (selectedPlatform === 'tiktok') {
+        result = await fetchBestPerformingTikToks(channelHandle, 50);
+      } else {
+        result = await fetchBestPerformingVideos(channelHandle, 50);
+      }
+      
       const { videos, channelInfo } = result;
       
       console.log(`[ContentImportSidebar] Imported ${videos.length} thumbnails from ${channelName} (${selectedPlatform})`);
@@ -140,12 +154,22 @@ const ContentImportSidebar = ({
     try {
       let channelInput = urlInput.trim();
       
-      // Check if this is a video URL and handle it appropriately
-      if (channelInput.includes('watch?v=') || channelInput.includes('youtu.be/')) {
-        const videoId = extractChannelFromVideoUrl(channelInput);
-        if (videoId) {
-          // For video URLs, provide helpful message
-          throw new Error('Video URLs are not directly supported. Please use the channel URL instead (e.g., youtube.com/@channelname)');
+      // Platform-specific URL validation
+      if (selectedPlatform === 'youtube') {
+        // Check if this is a video URL and handle it appropriately
+        if (channelInput.includes('watch?v=') || channelInput.includes('youtu.be/')) {
+          const videoId = extractChannelFromVideoUrl(channelInput);
+          if (videoId) {
+            // For video URLs, provide helpful message
+            throw new Error('Video URLs are not directly supported. Please use the channel URL instead (e.g., youtube.com/@channelname)');
+          }
+        }
+      } else if (selectedPlatform === 'tiktok') {
+        // Clean TikTok username (remove @ and tiktok.com URLs)
+        if (channelInput.includes('tiktok.com/@')) {
+          channelInput = channelInput.split('tiktok.com/@')[1].split('/')[0];
+        } else if (channelInput.startsWith('@')) {
+          channelInput = channelInput.substring(1);
         }
       }
       
@@ -157,13 +181,25 @@ const ContentImportSidebar = ({
       };
       
       let result;
-      if (importCriteria === 'views') {
-        // For "Most Viewed", use the sophisticated algorithm from fetchBestPerformingVideos
-        result = await fetchBestPerformingVideos(channelInput, videoCount);
+      
+      if (selectedPlatform === 'tiktok') {
+        // Use TikTok API
+        if (importCriteria === 'views') {
+          result = await fetchBestPerformingTikToks(channelInput, videoCount);
+        } else {
+          const sortBy = sortByMapping[importCriteria];
+          result = await fetchUserTikToks(channelInput, videoCount, sortBy);
+        }
       } else {
-        // For Recent and Engagement, use fetchChannelVideos with sorting
-        const sortBy = sortByMapping[importCriteria];
-        result = await fetchChannelVideos(channelInput, videoCount, sortBy);
+        // Use YouTube API (existing logic)
+        if (importCriteria === 'views') {
+          // For "Most Viewed", use the sophisticated algorithm from fetchBestPerformingVideos
+          result = await fetchBestPerformingVideos(channelInput, videoCount);
+        } else {
+          // For Recent and Engagement, use fetchChannelVideos with sorting
+          const sortBy = sortByMapping[importCriteria];
+          result = await fetchChannelVideos(channelInput, videoCount, sortBy);
+        }
       }
       
       const { videos, channelInfo } = result;
@@ -386,7 +422,7 @@ const ContentImportSidebar = ({
               </div>
 
               <div className="space-y-3">
-                {youtubePopularChannels.map((channel) => (
+                {(selectedPlatform === 'tiktok' ? popularTikTokCreators : youtubePopularChannels).map((channel) => (
                       <div
                         key={channel.handle}
                         className={cn(
@@ -531,34 +567,271 @@ const ContentImportSidebar = ({
           </div>
         )}
 
-        {/* TikTok Trending View - Placeholder */}
+        {/* TikTok Trending View */}
         {view === 'tiktok-trending' && (
-          <div className="flex-1 overflow-hidden flex items-center justify-center">
-            <div className="text-center px-6 py-12">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-pink-600/20 flex items-center justify-center">
-                <TrendingUp className="w-8 h-8 text-pink-400" />
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="mb-6">
+                <p className="text-sm text-gray-300 leading-relaxed mb-4">
+                  Import trending TikTok content to discover viral patterns and emerging trends.
+                </p>
+                
+                {/* Region Selector */}
+                <div className="mb-4">
+                  <label className="text-sm font-medium text-white mb-2 block">
+                    Region
+                  </label>
+                  <div className="flex gap-2">
+                    {['US', 'UK', 'JP', 'KR'].map((region) => (
+                      <button
+                        key={region}
+                        className="flex-1 py-2 text-sm font-medium rounded-md transition-colors bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
+                      >
+                        {region}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Video Count Selector */}
+                <div className="mb-6">
+                  <label className="text-sm font-medium text-white mb-2 block">
+                    Count
+                  </label>
+                  <div className="flex gap-2">
+                    {[20, 30, 50].map((count) => (
+                      <button
+                        key={count}
+                        onClick={() => setVideoCount(count)}
+                        className={cn(
+                          "flex-1 py-2 text-sm font-medium rounded-md transition-colors",
+                          videoCount === count
+                            ? "bg-pink-600 text-white shadow-sm"
+                            : "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
+                        )}
+                      >
+                        {count}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <h3 className="text-lg font-semibold text-white mb-2">TikTok Trending</h3>
-              <p className="text-sm text-gray-400 mb-4">Coming in the next update</p>
-              <p className="text-xs text-gray-500 leading-relaxed max-w-sm mx-auto">
-                We're building TikTok trending analysis to help you discover viral content patterns and emerging trends.
-              </p>
+            </div>
+            
+            {/* Import Button - Fixed at bottom */}
+            <div className="border-t border-gray-700 p-6">
+              <button
+                onClick={async () => {
+                  setLoading(true);
+                  setError('');
+                  try {
+                    const result = await fetchTrendingTikToks(videoCount, 'US');
+                    const platformVideos = result.videos.map(video => ({
+                      ...video,
+                      platform: 'tiktok',
+                      importSource: 'trending'
+                    }));
+                    
+                    onVideosImported(platformVideos, {
+                      title: 'TikTok Trending',
+                      platform: 'tiktok',
+                      metadata: result.metadata
+                    });
+                    onClose();
+                  } catch (err) {
+                    console.error('[ContentImportSidebar] TikTok trending import error:', err);
+                    setError(`Failed to import trending TikToks: ${err.message}`);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                className={cn(
+                  "w-full py-2.5 text-sm font-medium rounded-md transition-colors",
+                  "bg-pink-600 text-white",
+                  "hover:bg-pink-500",
+                  "disabled:opacity-50 disabled:cursor-not-allowed",
+                  "flex items-center gap-2 justify-center",
+                  "shadow-sm"
+                )}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Importing trending TikToks...</span>
+                  </>
+                ) : (
+                  <>
+                    <TrendingUp className="w-4 h-4" />
+                    <span>Import {videoCount} Trending TikToks</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}
 
-        {/* TikTok User View - Placeholder */}
+        {/* TikTok User View */}
         {view === 'tiktok-user' && (
-          <div className="flex-1 overflow-hidden flex items-center justify-center">
-            <div className="text-center px-6 py-12">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-pink-600/20 flex items-center justify-center">
-                <Users className="w-8 h-8 text-pink-400" />
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="mb-6">
+                <p className="text-sm text-gray-300 leading-relaxed mb-4">
+                  Import content from specific TikTok creators by entering their username.
+                </p>
+                  
+                {/* Username Input */}
+                <div className="relative mb-4">
+                  <input
+                    type="text"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    placeholder="@username or tiktok.com/@username"
+                    className={cn(
+                      "w-full px-4 py-3 pr-24 bg-gray-800 border border-gray-700 rounded-lg",
+                      "text-white placeholder-gray-500",
+                      "focus:outline-none focus:border-pink-500 transition-colors"
+                    )}
+                  />
+                  <button
+                    onClick={handlePasteUrl}
+                    className={cn(
+                      "absolute right-2 top-1/2 -translate-y-1/2",
+                      "px-3 py-1.5 text-sm bg-gray-700 text-gray-300 rounded-md",
+                      "hover:bg-gray-600 hover:text-white transition-colors",
+                      "flex items-center gap-1.5"
+                    )}
+                  >
+                    <Clipboard className="w-3.5 h-3.5" />
+                    <span>Paste</span>
+                  </button>
+                </div>
+
+                {/* Import Strategy */}
+                <div className="mb-6">
+                  <h4 className="text-sm font-medium text-white mb-3">Sort by</h4>
+                  
+                  <div className="flex gap-2">
+                    <label className="flex-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="importCriteria"
+                        value="views"
+                        checked={importCriteria === 'views'}
+                        onChange={(e) => setImportCriteria(e.target.value)}
+                        className="sr-only"
+                      />
+                      <div className={cn(
+                        "flex items-center gap-2 p-3 rounded-lg border transition-colors",
+                        importCriteria === 'views'
+                          ? "bg-pink-600/20 border-pink-500 text-white"
+                          : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600"
+                      )}>
+                        <TrendingUp className="w-4 h-4" />
+                        <span className="text-sm font-medium">Popular</span>
+                      </div>
+                    </label>
+
+                    <label className="flex-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="importCriteria"
+                        value="recent"
+                        checked={importCriteria === 'recent'}
+                        onChange={(e) => setImportCriteria(e.target.value)}
+                        className="sr-only"
+                      />
+                      <div className={cn(
+                        "flex items-center gap-2 p-3 rounded-lg border transition-colors",
+                        importCriteria === 'recent'
+                          ? "bg-green-600/20 border-green-500 text-white"
+                          : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600"
+                      )}>
+                        <Clock className="w-4 h-4" />
+                        <span className="text-sm font-medium">Recent</span>
+                      </div>
+                    </label>
+
+                    <label className="flex-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="importCriteria"
+                        value="engagement"
+                        checked={importCriteria === 'engagement'}
+                        onChange={(e) => setImportCriteria(e.target.value)}
+                        className="sr-only"
+                      />
+                      <div className={cn(
+                        "flex items-center gap-2 p-3 rounded-lg border transition-colors",
+                        importCriteria === 'engagement'
+                          ? "bg-red-600/20 border-red-500 text-white"
+                          : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600"
+                      )}>
+                        <Heart className="w-4 h-4" />
+                        <span className="text-sm font-medium">Engaging</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Video Count Selector */}
+                <div className="mb-6">
+                  <label className="text-sm font-medium text-white mb-2 block">
+                    Count
+                  </label>
+                  <div className="flex gap-2">
+                    {[25, 50, 75].map((count) => (
+                      <button
+                        key={count}
+                        onClick={() => setVideoCount(count)}
+                        className={cn(
+                          "flex-1 py-2 text-sm font-medium rounded-md transition-colors",
+                          videoCount === count
+                            ? "bg-pink-600 text-white shadow-sm"
+                            : "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
+                        )}
+                      >
+                        {count}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <h3 className="text-lg font-semibold text-white mb-2">TikTok User Analysis</h3>
-              <p className="text-sm text-gray-400 mb-4">Coming in the next update</p>
-              <p className="text-xs text-gray-500 leading-relaxed max-w-sm mx-auto">
-                Import and analyze content from specific TikTok creators to understand their content strategy and performance.
-              </p>
+            </div>
+            
+            {/* Import Button - Fixed at bottom */}
+            <div className="border-t border-gray-700 p-6">
+              <button
+                onClick={handleUrlImport}
+                disabled={!urlInput || loading}
+                className={cn(
+                  "w-full py-2.5 text-sm font-medium rounded-md transition-colors",
+                  "bg-pink-600 text-white",
+                  "hover:bg-pink-500",
+                  "disabled:opacity-50 disabled:cursor-not-allowed",
+                  "flex items-center gap-2 justify-center",
+                  "shadow-sm"
+                )}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Importing {videoCount} TikToks...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    <span>
+                      Import {videoCount} TikToks {
+                        importCriteria === 'views' ? '(Popular)' :
+                        importCriteria === 'recent' ? '(Recent)' :
+                        importCriteria === 'engagement' ? '(Engaging)' :
+                        ''
+                      }
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}
