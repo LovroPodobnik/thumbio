@@ -14,7 +14,9 @@ import {
   Clipboard,
   ArrowLeft,
   Clock,
-  Heart
+  Heart,
+  Play,
+  Music
 } from 'lucide-react';
 
 const ContentImportSidebar = ({ 
@@ -24,8 +26,9 @@ const ContentImportSidebar = ({
   onCreateChannelHeader,
   sidebarWidth = 240 // Pass main sidebar width to position correctly
 }) => {
-  // Removed excessive console.log that was flooding the console
-  const [view, setView] = useState('main'); // 'main', 'url', or 'search'
+  // Multi-platform state management
+  const [view, setView] = useState('platforms'); // 'platforms', 'youtube-main', 'youtube-quick', 'youtube-url', 'tiktok-main', 'tiktok-trending', 'tiktok-user'
+  const [selectedPlatform, setSelectedPlatform] = useState(null); // 'youtube' or 'tiktok'
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [importingChannel, setImportingChannel] = useState(null);
@@ -36,8 +39,32 @@ const ContentImportSidebar = ({
   const [videoCount, setVideoCount] = useState(50);
   
 
-  // Popular channels data for quick import
-  const popularChannels = [
+  // Platform configuration
+  const platforms = [
+    {
+      id: 'youtube',
+      name: 'YouTube',
+      description: 'Import thumbnails from YouTube channels and videos',
+      icon: Play,
+      color: 'red',
+      gradient: 'from-red-600 to-red-500',
+      hoverGradient: 'from-red-500 to-red-400',
+      features: ['Quick Import', 'URL Import', 'Best Performers']
+    },
+    {
+      id: 'tiktok',
+      name: 'TikTok',
+      description: 'Import content from TikTok creators and trending videos',
+      icon: Music,
+      color: 'pink',
+      gradient: 'from-pink-600 to-pink-500',
+      hoverGradient: 'from-pink-500 to-pink-400',
+      features: ['Trending Content', 'User Posts', 'Viral Analysis']
+    }
+  ];
+
+  // YouTube popular channels data for quick import
+  const youtubePopularChannels = [
     { handle: "@MrBeast", name: "MrBeast", subscribers: "329M", subscriberCount: 329000000, category: "Entertainment", avatar: "MB", trending: true, verified: true },
     { handle: "@PewDiePie", name: "PewDiePie", subscribers: "111M", subscriberCount: 111000000, category: "Gaming", avatar: "PD", verified: true },
     { handle: "@MarkRober", name: "Mark Rober", subscribers: "25M", subscriberCount: 25000000, category: "Science", avatar: "MR", verified: true },
@@ -57,9 +84,21 @@ const ContentImportSidebar = ({
       const result = await fetchBestPerformingVideos(channelHandle, 50);
       const { videos, channelInfo } = result;
       
-      console.log(`[ContentImportSidebar] Imported ${videos.length} thumbnails from ${channelName}`);
+      console.log(`[ContentImportSidebar] Imported ${videos.length} thumbnails from ${channelName} (${selectedPlatform})`);
       
-      onVideosImported(videos, channelInfo);
+      // Add platform information to the imported content
+      const platformVideos = videos.map(video => ({
+        ...video,
+        platform: selectedPlatform || 'youtube',
+        importSource: 'quick'
+      }));
+      
+      const platformChannelInfo = {
+        ...channelInfo,
+        platform: selectedPlatform || 'youtube'
+      };
+      
+      onVideosImported(platformVideos, platformChannelInfo);
       if (onCreateChannelHeader && channelInfo) {
         onCreateChannelHeader(channelInfo.title);
       }
@@ -129,9 +168,22 @@ const ContentImportSidebar = ({
       
       const { videos, channelInfo } = result;
       
-      console.log(`[ContentImportSidebar] Imported ${videos.length} thumbnails from URL (${importCriteria}): ${channelInput}`);
+      console.log(`[ContentImportSidebar] Imported ${videos.length} thumbnails from URL (${importCriteria}, ${selectedPlatform}): ${channelInput}`);
       
-      onVideosImported(videos, channelInfo);
+      // Add platform information to the imported content
+      const platformVideos = videos.map(video => ({
+        ...video,
+        platform: selectedPlatform || 'youtube',
+        importSource: 'url',
+        importCriteria: importCriteria
+      }));
+      
+      const platformChannelInfo = {
+        ...channelInfo,
+        platform: selectedPlatform || 'youtube'
+      };
+      
+      onVideosImported(platformVideos, platformChannelInfo);
       if (onCreateChannelHeader && channelInfo) {
         onCreateChannelHeader(channelInfo.title);
       }
@@ -168,9 +220,13 @@ const ContentImportSidebar = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-700 bg-gray-900/95 backdrop-blur-sm">
           <h2 className="text-2xl font-bold text-white tracking-tight">
-            {view === 'main' && 'Import Content'}
-            {view === 'quick' && 'Quick Import'}
-            {view === 'url' && 'Import from URL'}
+            {view === 'platforms' && 'Import Content'}
+            {view === 'youtube-main' && 'YouTube Import'}
+            {view === 'youtube-quick' && 'Quick Import - YouTube'}
+            {view === 'youtube-url' && 'Import from YouTube URL'}
+            {view === 'tiktok-main' && 'TikTok Import'}
+            {view === 'tiktok-trending' && 'Trending - TikTok'}
+            {view === 'tiktok-user' && 'Import from TikTok User'}
           </h2>
           <button
             onClick={onClose}
@@ -182,33 +238,110 @@ const ContentImportSidebar = ({
         </div>
 
         {/* Back button for sub-views */}
-        {view !== 'main' && (
+        {view !== 'platforms' && (
           <div className="px-6 py-4 border-b border-gray-700/50">
             <button
-              onClick={() => setView('main')}
+              onClick={() => {
+                if (view.startsWith('youtube-') || view.startsWith('tiktok-')) {
+                  if (view.includes('-main')) {
+                    setView('platforms');
+                    setSelectedPlatform(null);
+                  } else {
+                    setView(selectedPlatform + '-main');
+                  }
+                } else {
+                  setView('platforms');
+                }
+              }}
               className="flex items-center gap-3 w-full px-4 py-3 text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800/80 rounded-lg transition-all duration-200 group"
             >
               <div className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center group-hover:bg-gray-700 transition-colors">
                 <ArrowLeft className="w-4 h-4 group-hover:text-white" />
               </div>
-              <span>Back to import options</span>
+              <span>
+                {view.includes('-main') ? 'Back to platforms' : 
+                 view.startsWith('youtube-') ? 'Back to YouTube options' :
+                 view.startsWith('tiktok-') ? 'Back to TikTok options' :
+                 'Back to import options'}
+              </span>
             </button>
           </div>
         )}
 
-        {/* Main View - Import Options */}
-        {view === 'main' && (
+        {/* Platform Selection View */}
+        {view === 'platforms' && (
+          <div className="flex-1 overflow-hidden">
+            <div className="px-6 py-6 space-y-6">
+              <p className="text-sm text-gray-300 leading-relaxed">
+                Choose your platform to import content for analysis and competitive intelligence.
+              </p>
+              
+              {/* Platform Options */}
+              <div className="space-y-4">
+                {platforms.map((platform) => {
+                  const IconComponent = platform.icon;
+                  return (
+                    <button
+                      key={platform.id}
+                      onClick={() => {
+                        setSelectedPlatform(platform.id);
+                        setView(platform.id + '-main');
+                        setError(''); // Clear any previous errors
+                      }}
+                      className={cn(
+                        "w-full p-5 rounded-xl transition-all duration-200 text-left group shadow-lg hover:shadow-xl transform hover:scale-[1.02]",
+                        `bg-gradient-to-r ${platform.gradient} hover:${platform.hoverGradient}`
+                      )}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                          <IconComponent className="w-6 h-6 text-white" strokeWidth={2.5} />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-base font-semibold text-white mb-1">{platform.name}</h3>
+                          <p className="text-sm text-white/80 mb-2">{platform.description}</p>
+                          <div className="flex gap-2 flex-wrap">
+                            {platform.features.map((feature) => (
+                              <span 
+                                key={feature}
+                                className="text-xs px-2 py-1 bg-white/20 rounded-full text-white/90"
+                              >
+                                {feature}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <Plus className="w-5 h-5 text-white/80 group-hover:text-white group-hover:rotate-90 transition-all duration-200" />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Platform Comparison */}
+              <div className="mt-8 p-4 bg-gray-800/50 border border-gray-700/50 rounded-xl backdrop-blur-sm">
+                <h4 className="text-sm font-medium text-white mb-2">Multi-Platform Analysis</h4>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Import content from multiple platforms to get comprehensive competitive insights and discover cross-platform trends.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* YouTube Main View */}
+        {view === 'youtube-main' && (
           <div className="flex-1 overflow-hidden">
             <div className="px-6 py-6 space-y-4">
               <p className="text-sm text-gray-300 leading-relaxed">
                 Choose how you'd like to import YouTube thumbnails for analysis and inspiration.
               </p>
               
-              {/* Import Method Options */}
+              {/* YouTube Import Method Options */}
               <div className="space-y-4">
                 <button
-                  onClick={() => setView('quick')}
-                  className="w-full p-5 bg-gradient-to-r from-blue-600 to-blue-500 rounded-xl hover:from-blue-500 hover:to-blue-400 transition-all duration-200 text-left group shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
+                  onClick={() => setView('youtube-quick')}
+                  className="w-full p-5 bg-gradient-to-r from-red-600 to-red-500 rounded-xl hover:from-red-500 hover:to-red-400 transition-all duration-200 text-left group shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
                 >
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -216,14 +349,14 @@ const ContentImportSidebar = ({
                     </div>
                     <div className="flex-1">
                       <h3 className="text-base font-semibold text-white mb-1">Quick Import</h3>
-                      <p className="text-sm text-blue-100">Import from popular creators</p>
+                      <p className="text-sm text-red-100">Import from popular YouTube creators</p>
                     </div>
                     <Plus className="w-5 h-5 text-white/80 group-hover:text-white group-hover:rotate-90 transition-all duration-200" />
                   </div>
                 </button>
 
                 <button
-                  onClick={() => setView('url')}
+                  onClick={() => setView('youtube-url')}
                   className="w-full p-5 bg-gray-800/80 border border-gray-600 rounded-xl hover:bg-gray-700/80 hover:border-gray-500 transition-all duration-200 text-left group backdrop-blur-sm"
                 >
                   <div className="flex items-center gap-4">
@@ -237,14 +370,13 @@ const ContentImportSidebar = ({
                     <Plus className="w-5 h-5 text-gray-400 group-hover:text-white group-hover:rotate-90 transition-all duration-200" />
                   </div>
                 </button>
-
               </div>
             </div>
           </div>
         )}
 
-        {/* Quick Import View */}
-        {view === 'quick' && (
+        {/* YouTube Quick Import View */}
+        {view === 'youtube-quick' && (
           <ScrollArea.Root className="flex-1 overflow-hidden">
             <ScrollArea.Viewport className="h-full w-full px-6 py-6">
               <div className="mb-6">
@@ -254,7 +386,7 @@ const ContentImportSidebar = ({
               </div>
 
               <div className="space-y-3">
-                {popularChannels.map((channel) => (
+                {youtubePopularChannels.map((channel) => (
                       <div
                         key={channel.handle}
                         className={cn(
@@ -340,13 +472,104 @@ const ContentImportSidebar = ({
               </ScrollArea.Root>
         )}
 
-        {/* URL Import View */}
-        {view === 'url' && (
+        {/* TikTok Main View */}
+        {view === 'tiktok-main' && (
+          <div className="flex-1 overflow-hidden">
+            <div className="px-6 py-6 space-y-4">
+              <p className="text-sm text-gray-300 leading-relaxed">
+                Import TikTok content for competitive analysis and trend discovery.
+              </p>
+              
+              {/* TikTok Import Method Options */}
+              <div className="space-y-4">
+                <button
+                  onClick={() => setView('tiktok-trending')}
+                  className="w-full p-5 bg-gradient-to-r from-pink-600 to-pink-500 rounded-xl hover:from-pink-500 hover:to-pink-400 transition-all duration-200 text-left group shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <TrendingUp className="w-6 h-6 text-white" strokeWidth={2.5} />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-base font-semibold text-white mb-1">Trending Content</h3>
+                      <p className="text-sm text-pink-100">Discover viral TikTok trends and hashtags</p>
+                    </div>
+                    <Plus className="w-5 h-5 text-white/80 group-hover:text-white group-hover:rotate-90 transition-all duration-200" />
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setView('tiktok-user')}
+                  className="w-full p-5 bg-gray-800/80 border border-gray-600 rounded-xl hover:bg-gray-700/80 hover:border-gray-500 transition-all duration-200 text-left group backdrop-blur-sm"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center group-hover:bg-gray-600 transition-colors">
+                      <Users className="w-6 h-6 text-gray-300 group-hover:text-white" strokeWidth={2.5} />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-base font-semibold text-white mb-1">Import from User</h3>
+                      <p className="text-sm text-gray-300">Analyze specific TikTok creators</p>
+                    </div>
+                    <Plus className="w-5 h-5 text-gray-400 group-hover:text-white group-hover:rotate-90 transition-all duration-200" />
+                  </div>
+                </button>
+
+                {/* Coming Soon placeholder */}
+                <div className="p-4 bg-gray-800/30 border border-gray-700/30 rounded-xl opacity-60">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-gray-700/50 flex items-center justify-center">
+                      <Music className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-400">More TikTok features coming soon</p>
+                      <p className="text-xs text-gray-500">Hashtag analysis, sound trends, and more</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TikTok Trending View - Placeholder */}
+        {view === 'tiktok-trending' && (
+          <div className="flex-1 overflow-hidden flex items-center justify-center">
+            <div className="text-center px-6 py-12">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-pink-600/20 flex items-center justify-center">
+                <TrendingUp className="w-8 h-8 text-pink-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">TikTok Trending</h3>
+              <p className="text-sm text-gray-400 mb-4">Coming in the next update</p>
+              <p className="text-xs text-gray-500 leading-relaxed max-w-sm mx-auto">
+                We're building TikTok trending analysis to help you discover viral content patterns and emerging trends.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* TikTok User View - Placeholder */}
+        {view === 'tiktok-user' && (
+          <div className="flex-1 overflow-hidden flex items-center justify-center">
+            <div className="text-center px-6 py-12">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-pink-600/20 flex items-center justify-center">
+                <Users className="w-8 h-8 text-pink-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">TikTok User Analysis</h3>
+              <p className="text-sm text-gray-400 mb-4">Coming in the next update</p>
+              <p className="text-xs text-gray-500 leading-relaxed max-w-sm mx-auto">
+                Import and analyze content from specific TikTok creators to understand their content strategy and performance.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* YouTube URL Import View */}
+        {view === 'youtube-url' && (
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="flex-1 overflow-y-auto px-6 py-6">
               <div className="mb-6">
                 <p className="text-sm text-gray-300 leading-relaxed mb-4">
-                  Import thumbnails from any YouTube channel.
+                  Import thumbnails from any YouTube channel by pasting a URL.
                 </p>
                   
                   {/* URL Input */}
