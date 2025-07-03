@@ -18,9 +18,28 @@
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
+.env.example
 
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .vercel
 client_secret_*.json
+
+# Development documentation and project files
+/Docs/
+CLAUDE.md
+IDEA.md
+TIKTOK_SHAPE_CLICK_ISSUE.md
+
+# PartyKit development files
+.partykit/
+
+# Common files that shouldn't be in Git
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
