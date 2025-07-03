@@ -62,10 +62,13 @@ const canMakeRequest = (operationType = 'SEARCH') => {
   return true;
 };
 
-// Track API request
-const trackRequest = () => {
+// Track API request and add delay to prevent rate limiting
+const trackRequest = async () => {
   API_USAGE.requests++;
   logger.log(`[API Safety] Request #${API_USAGE.requests} made. Rate: ${(API_USAGE.requests / Math.max((Date.now() - API_USAGE.lastReset) / (1000 * 60 * 60), 1)).toFixed(1)} req/hour`);
+  
+  // Add small delay to prevent rate limiting (250ms between requests)
+  await new Promise(resolve => setTimeout(resolve, 250));
 };
 
 // Common headers for all requests
@@ -77,7 +80,7 @@ const getHeaders = () => ({
 // Make API request with error handling
 const makeRequest = async (endpoint, params = {}) => {
   canMakeRequest();
-  trackRequest();
+  await trackRequest();
   
   const url = new URL(`${BASE_URL}${endpoint}`);
   Object.keys(params).forEach(key => {
@@ -176,17 +179,25 @@ export const searchVideos = async (query, maxResults = 20, sortBy = 'relevance')
       return [];
     }
     
-    // Get detailed information for each video
-    const videoDetailsPromises = data.items.slice(0, maxResults).map(async (item) => {
-      try {
-        return await getVideoDetails(item.id);
-      } catch (error) {
-        logger.warn(`[YouTube API] Failed to get details for video ${item.id}:`, error.message);
-        return formatSearchItemData(item);
-      }
-    });
+    // Get detailed information for each video (with limited concurrency to avoid rate limits)
+    const videos = data.items.slice(0, maxResults);
+    const videoDetails = [];
     
-    const videoDetails = await Promise.all(videoDetailsPromises);
+    // Process videos in batches of 3 to avoid rate limiting
+    for (let i = 0; i < videos.length; i += 3) {
+      const batch = videos.slice(i, i + 3);
+      const batchPromises = batch.map(async (item) => {
+        try {
+          return await getVideoDetails(item.id);
+        } catch (error) {
+          logger.warn(`[YouTube API] Failed to get details for video ${item.id}:`, error.message);
+          return formatSearchItemData(item);
+        }
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      videoDetails.push(...batchResults);
+    }
     
     // Sort videos based on the specified criteria (client-side sorting)
     const sortedVideos = sortVideos(videoDetails.filter(v => v), sortBy);
