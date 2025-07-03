@@ -102,7 +102,7 @@ const makeRequest = async (endpoint, params = {}) => {
   const data = await response.json();
   logger.log('[YouTube API] Response data:', data);
   
-  if (!data.status || data.errorId !== 'Success') {
+  if (!data.status || (data.errorId && data.errorId !== 'Success')) {
     throw new Error(`YouTube API error: ${data.errorId || 'Unknown error'}`);
   }
   

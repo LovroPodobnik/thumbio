@@ -1,5 +1,5 @@
 import { PlatformPlugin } from '../PlatformPlugin.js';
-import { fetchBestPerformingVideos, fetchChannelVideos } from '../../youtubeApi.js';
+import { fetchBestPerformingVideos, fetchChannelVideos, searchVideos, getSearchSuggestions } from '../../youtubeApi.js';
 import { Play, TrendingUp, Link } from 'lucide-react';
 
 /**
@@ -55,6 +55,24 @@ export class YouTubePlatform extends PlatformPlugin {
         icon: Link,
         gradient: 'from-gray-800 to-gray-700',
         hoverGradient: 'from-gray-700 to-gray-600',
+        primary: false
+      },
+      {
+        id: 'search',
+        name: 'Search Videos',
+        description: 'Search YouTube for specific content',
+        icon: 'Search',
+        gradient: 'from-blue-600 to-blue-500',
+        hoverGradient: 'from-blue-500 to-blue-400',
+        primary: false
+      },
+      {
+        id: 'trending',
+        name: 'Trending Content',
+        description: 'Import currently trending videos',
+        icon: TrendingUp,
+        gradient: 'from-orange-600 to-orange-500',
+        hoverGradient: 'from-orange-500 to-orange-400',
         primary: false
       }
     ];
@@ -167,17 +185,97 @@ export class YouTubePlatform extends PlatformPlugin {
   }
 
   /**
-   * Import trending YouTube content (not implemented yet)
+   * Import trending YouTube content
    */
   async importTrending(count = 30, region = 'US') {
-    throw new Error('Trending import is not yet implemented for YouTube');
+    try {
+      console.log(`[YouTubePlatform] Importing trending content (${count} videos)`);
+      
+      // Use popular search terms to simulate trending content
+      const trendingQueries = [
+        'trending',
+        'viral',
+        'popular today',
+        'trending videos',
+        'viral videos 2024'
+      ];
+      
+      // Pick a random trending query for variety
+      const randomQuery = trendingQueries[Math.floor(Math.random() * trendingQueries.length)];
+      const videos = await searchVideos(randomQuery, count, 'views');
+      
+      // Transform data
+      const transformedVideos = this.transformData(videos, {
+        importSource: 'trending',
+        importedFrom: 'YouTube Trending',
+        region: region
+      });
+      
+      console.log(`[YouTubePlatform] Successfully imported ${transformedVideos.length} trending videos`);
+      
+      return {
+        videos: transformedVideos,
+        channelInfo: {
+          title: 'YouTube Trending',
+          description: `Trending videos in ${region}`,
+          platform: this.id
+        },
+        metadata: {
+          platform: this.id,
+          method: 'trending',
+          region: region,
+          query: randomQuery,
+          timestamp: new Date().toISOString()
+        }
+      };
+    } catch (error) {
+      console.error(`[YouTubePlatform] Trending import failed:`, error);
+      throw new Error(`Failed to import trending content: ${error.message}`);
+    }
   }
 
   /**
-   * Search YouTube content (not implemented yet)
+   * Search YouTube content
    */
   async searchContent(query, count = 20, sortBy = 'relevance') {
-    throw new Error('Content search is not yet implemented for YouTube');
+    try {
+      console.log(`[YouTubePlatform] Searching for: "${query}" (${count} results, sorted by ${sortBy})`);
+      
+      if (!query || query.trim().length === 0) {
+        throw new Error('Search query cannot be empty');
+      }
+      
+      const videos = await searchVideos(query.trim(), count, sortBy);
+      
+      // Transform data
+      const transformedVideos = this.transformData(videos, {
+        importSource: 'search',
+        searchQuery: query,
+        sortCriteria: sortBy,
+        importedFrom: 'YouTube Search'
+      });
+      
+      console.log(`[YouTubePlatform] Successfully found ${transformedVideos.length} videos for query: "${query}"`);
+      
+      return {
+        videos: transformedVideos,
+        channelInfo: {
+          title: `Search: "${query}"`,
+          description: `YouTube search results for "${query}"`,
+          platform: this.id
+        },
+        metadata: {
+          platform: this.id,
+          method: 'search',
+          query: query,
+          sortBy: sortBy,
+          timestamp: new Date().toISOString()
+        }
+      };
+    } catch (error) {
+      console.error(`[YouTubePlatform] Search failed:`, error);
+      throw new Error(`Failed to search YouTube: ${error.message}`);
+    }
   }
 
   /**
@@ -187,13 +285,18 @@ export class YouTubePlatform extends PlatformPlugin {
     const cleanUrl = url.trim();
     
     // Check for video URLs and provide helpful error
-    if (cleanUrl.includes('watch?v=') || cleanUrl.includes('youtu.be/')) {
-      const videoIdMatch = cleanUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-      if (videoIdMatch) {
-        throw new Error('Video URLs are not directly supported. Please use the channel URL instead (e.g., youtube.com/@channelname)');
-      }
+    const videoId = this.extractVideoId(cleanUrl);
+    if (videoId) {
+      throw new Error('Video URLs are not directly supported. Please use the channel URL instead (e.g., youtube.com/@channelname)');
     }
     
+    // Try to extract channel identifier
+    const channelIdentifier = this.extractChannelIdentifier(cleanUrl);
+    if (channelIdentifier) {
+      return channelIdentifier;
+    }
+    
+    // If it's not a full URL, assume it's a channel handle or name
     return cleanUrl;
   }
 
@@ -298,6 +401,61 @@ export class YouTubePlatform extends PlatformPlugin {
    */
   getCountOptions() {
     return [25, 50, 75];
+  }
+
+  /**
+   * Get search suggestions for YouTube
+   */
+  async getSearchSuggestions(query) {
+    try {
+      if (!query || query.length < 2) {
+        return [];
+      }
+      
+      const suggestions = await getSearchSuggestions(query);
+      return suggestions.slice(0, 8); // Limit to 8 suggestions
+    } catch (error) {
+      console.warn(`[YouTubePlatform] Failed to get search suggestions:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Validate YouTube video ID format
+   */
+  isValidVideoId(videoId) {
+    return /^[a-zA-Z0-9_-]{11}$/.test(videoId);
+  }
+
+  /**
+   * Extract video ID from YouTube URL
+   */
+  extractVideoId(url) {
+    const videoIdMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+    return videoIdMatch ? videoIdMatch[1] : null;
+  }
+
+  /**
+   * Extract channel handle or ID from YouTube URL
+   */
+  extractChannelIdentifier(url) {
+    // Handle @username format
+    const handleMatch = url.match(/youtube\.com\/@([a-zA-Z0-9_-]+)/);
+    if (handleMatch) return `@${handleMatch[1]}`;
+    
+    // Handle channel ID format
+    const channelIdMatch = url.match(/youtube\.com\/channel\/([a-zA-Z0-9_-]+)/);
+    if (channelIdMatch) return channelIdMatch[1];
+    
+    // Handle custom URL format
+    const customUrlMatch = url.match(/youtube\.com\/c\/([a-zA-Z0-9_-]+)/);
+    if (customUrlMatch) return customUrlMatch[1];
+    
+    // Handle user format (legacy)
+    const userMatch = url.match(/youtube\.com\/user\/([a-zA-Z0-9_-]+)/);
+    if (userMatch) return userMatch[1];
+    
+    return null;
   }
 }
 
