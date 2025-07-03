@@ -8,8 +8,12 @@ import ContentImportSidebar from './ContentImportSidebar';
 import YouTubeImporter from './YouTubeImporter';
 import DualSidebar from './DualSidebar';
 
-// Simple YouTube data storage (replace complex state management)
+// Import TikTok shape utility
+import { TikTokShapeUtil } from './shapes/TikTokShapeUtil';
+
+// Simple data storage for both platforms
 let youtubeVideos = [];
+let tiktokVideos = [];
 let showContentImport = false;
 let showYouTubeImporter = false;
 let sidebarOpen = false; // Start collapsed by default like original
@@ -235,7 +239,8 @@ class ThumbnailShapeUtil extends ShapeUtil {
       width: shape.props.w,
       height: shape.props.h,
       x: 0,
-      y: 0
+      y: 0,
+      isFilled: true  // Ensure the entire shape is clickable
     })
   }
   
@@ -298,6 +303,7 @@ class ThumbnailShapeUtil extends ShapeUtil {
 }
 
 // Create a factory function for the conditional StylePanel
+// Hides StylePanel (including opacity slider) when thumbnails are selected
 const createConditionalStylePanel = (shouldHide) => {
   return shouldHide ? () => null : DefaultStylePanel;
 };
@@ -312,13 +318,13 @@ const TldrawCanvasHybrid = () => {
   const [showDualSidebar, setShowDualSidebar] = useState(false);
   const [dualSidebarWidth, setDualSidebarWidth] = useState(420);
 
-  const shapeUtils = useMemo(() => [ThumbnailShapeUtil], []);
+  const shapeUtils = useMemo(() => [ThumbnailShapeUtil, TikTokShapeUtil], []);
 
-  // Create components object that hides StylePanel when dual sidebar is visible
+  // Create components object that hides StylePanel when thumbnails are selected
   const tldrawComponents = useMemo(() => ({
     Watermark: () => null, // Remove tldraw watermark
-    StylePanel: createConditionalStylePanel(showDualSidebar), // Hide StylePanel when dual sidebar is visible
-  }), [showDualSidebar]);
+    StylePanel: createConditionalStylePanel(selectedThumbnailForSidebar !== null), // Hide StylePanel when thumbnail is selected
+  }), [selectedThumbnailForSidebar]);
 
 
   // Force re-render function
@@ -584,6 +590,42 @@ const TldrawCanvasHybrid = () => {
       y: shape.y
     };
   }, []);
+
+  // Data transformation: Convert TikTok tldraw shape to analytics format
+  const convertTikTokShapeToAnalyticsData = useCallback((shape) => {
+    if (!shape || shape.type !== 'tiktok-video') return null;
+    
+    const { props } = shape;
+    
+    return {
+      id: props.videoId,
+      title: props.title || 'TikTok Video',
+      platform: 'tiktok',
+      creator: {
+        username: props.username,
+        displayName: props.displayName,
+        verified: props.verified
+      },
+      coverUrl: props.coverUrl,
+      metrics: {
+        viewCount: props.playCount || 0,
+        likeCount: props.likeCount || 0,
+        commentCount: props.commentCount || 0,
+        shareCount: props.shareCount || 0,
+        engagement: props.engagement || 0
+      },
+      music: {
+        title: props.musicTitle,
+        artist: props.musicArtist
+      },
+      hashtags: props.hashtags || [],
+      isViral: props.isViral,
+      trendingScore: props.trendingScore,
+      importedAt: props.importedAt,
+      x: shape.x,
+      y: shape.y
+    };
+  }, []);
   
   
   // Debounced handler only for expensive operations like re-renders
@@ -600,11 +642,21 @@ const TldrawCanvasHybrid = () => {
     
     const handleSelectionChange = () => {
       const selectedShapes = editor.getSelectedShapes();
-      const thumbnails = selectedShapes.filter(s => s.type === 'youtube-thumbnail');
+      const contentShapes = selectedShapes.filter(s => 
+        s.type === 'youtube-thumbnail' || s.type === 'tiktok-video'
+      );
       
-      // Immediate sidebar update for single thumbnail selection
-      if (thumbnails.length === 1) {
-        const sidebarData = convertTldrawShapeToAnalyticsData(thumbnails[0]);
+      // Immediate sidebar update for single content selection
+      if (contentShapes.length === 1) {
+        const shape = contentShapes[0];
+        let sidebarData;
+        
+        if (shape.type === 'youtube-thumbnail') {
+          sidebarData = convertTldrawShapeToAnalyticsData(shape);
+        } else if (shape.type === 'tiktok-video') {
+          sidebarData = convertTikTokShapeToAnalyticsData(shape);
+        }
+        
         setSelectedThumbnailForSidebar(sidebarData);
         setShowDualSidebar(true);
       } else {
@@ -626,7 +678,7 @@ const TldrawCanvasHybrid = () => {
     return () => {
       editor.off('change', handleSelectionChange);
     };
-  }, [editor, convertTldrawShapeToAnalyticsData, debouncedForceUpdate]);
+  }, [editor, convertTldrawShapeToAnalyticsData, convertTikTokShapeToAnalyticsData, debouncedForceUpdate]);
   
   
 
@@ -646,6 +698,30 @@ const TldrawCanvasHybrid = () => {
     }
   };
 
+  // Layout calculation for mixed content
+  const calculateMixedLayout = (youtubeCount, tiktokCount) => {
+    const layouts = {
+      youtube: {
+        columns: 4,
+        itemWidth: 320,
+        itemHeight: 180,
+        spacing: 40,
+        startX: 100,
+        startY: 100
+      },
+      tiktok: {
+        columns: 6,
+        itemWidth: 270,
+        itemHeight: 480,
+        spacing: 30,
+        startX: 100,
+        startY: youtubeCount > 0 ? 400 : 100
+      }
+    };
+    
+    return layouts;
+  };
+
   // Simple mock implementation of canvas actions
   const mockCanvasActions = {
     importThumbnails: (thumbnails) => {
@@ -656,79 +732,136 @@ const TldrawCanvasHybrid = () => {
         return;
       }
       
-      youtubeVideos = thumbnails;
+      // Detect platform and separate content
+      const platform = thumbnails[0]?.platform || 'youtube';
+      console.log('Detected platform:', platform);
+      
+      if (platform === 'tiktok') {
+        tiktokVideos = [...tiktokVideos, ...thumbnails];
+      } else {
+        youtubeVideos = [...youtubeVideos, ...thumbnails];
+      }
       
       if (editor && thumbnails.length > 0) {
         try {
-          // Convert YouTube data to tldraw shapes
-          const shapes = thumbnails.map((video, index) => {
-            console.log('Processing video structure:', {
-              id: video.id,
-              snippet: video.snippet,
-              statistics: video.statistics,
-              metrics: video.metrics,
-              fullVideo: video
+          // Get current layout info
+          const layouts = calculateMixedLayout(youtubeVideos.length, tiktokVideos.length);
+          const platformLayout = layouts[platform];
+          
+          let shapes;
+          
+          if (platform === 'tiktok') {
+            // Create TikTok shapes
+            shapes = thumbnails.map((video, index) => {
+              console.log('Processing TikTok video:', video);
+              
+              const row = Math.floor(index / platformLayout.columns);
+              const col = index % platformLayout.columns;
+              
+              return {
+                id: createShapeId(`tiktok-${video.id}`),
+                type: 'tiktok-video',
+                x: platformLayout.startX + col * (platformLayout.itemWidth + platformLayout.spacing),
+                y: platformLayout.startY + row * (platformLayout.itemHeight + platformLayout.spacing),
+                props: {
+                  videoId: video.id,
+                  title: video.title || 'TikTok Video',
+                  coverUrl: video.url || '',
+                  username: video.creator?.username || 'unknown',
+                  displayName: video.creator?.displayName || 'Unknown User',
+                  playCount: video.metrics?.viewCount || 0,
+                  likeCount: video.metrics?.likeCount || 0,
+                  commentCount: video.metrics?.commentCount || 0,
+                  shareCount: video.metrics?.shareCount || 0,
+                  engagement: video.engagement || 0,
+                  isViral: video.engagement > 10,
+                  w: platformLayout.itemWidth,
+                  h: platformLayout.itemHeight,
+                  locked: false,
+                  showMetrics: true,
+                  musicTitle: video.music?.title || '',
+                  musicArtist: video.music?.author || '',
+                  hashtags: video.hashtags || [],
+                  verified: video.creator?.verified || false,
+                  trendingScore: video.engagement || 0,
+                  importedAt: video.importedAt || new Date().toISOString()
+                }
+              };
             });
-            
-            // Handle different possible data structures
-            const videoId = video.id?.videoId || video.id || video.videoId || `video-${index}`;
-            const snippet = video.snippet || video;
-            
-            // Try to get statistics from multiple possible locations
-            const statistics = video.statistics || video.metrics || {};
-            
-            // For formatted videos from youtubeApi.js, metrics might be nested
-            const metricsData = video.metrics || {};
-            const finalStats = {
-              viewCount: statistics.viewCount || metricsData.viewCount || '0',
-              likeCount: statistics.likeCount || metricsData.likeCount || '0',
-              commentCount: statistics.commentCount || metricsData.commentCount || '0'
-            };
-            
-            console.log('Final statistics for processing:', {
-              videoId,
-              finalStats,
-              originalStats: statistics,
-              originalMetrics: metricsData
-            });
-            
-            if (!videoId) {
-              console.error('No video ID found for video:', video);
-              return null;
-            }
-            
-            const views = parseViewCount(finalStats.viewCount);
-            const engagement = calculateEngagement(finalStats);
-            
-            console.log('Calculated metrics:', {
-              videoId,
-              title: snippet.title,
-              views,
-              engagement,
-              rawViewCount: finalStats.viewCount
-            });
-            
-            return {
-              id: createShapeId(`youtube-${videoId}`),
-              type: 'youtube-thumbnail',
-              x: 100 + (index % 4) * 360,
-              y: 100 + Math.floor(index / 4) * 220,
-              props: {
-                videoId: videoId,
-                title: snippet.title || 'Unknown Title',
-                thumbnailUrl: getBestThumbnailUrl(video),
-                channelName: snippet.channelTitle || snippet.channelName || 'Unknown Channel',
-                views: views,
-                engagement: engagement,
-                isViral: isVideoViral(finalStats),
-                zScore: calculateZScore(finalStats),
-                w: 320,
-                h: 180,
-                locked: false,
-                showMetrics: true
+          } else {
+            // Create YouTube shapes (existing logic with new layout)
+            shapes = thumbnails.map((video, index) => {
+              console.log('Processing video structure:', {
+                id: video.id,
+                snippet: video.snippet,
+                statistics: video.statistics,
+                metrics: video.metrics,
+                fullVideo: video
+              });
+              
+              // Handle different possible data structures
+              const videoId = video.id?.videoId || video.id || video.videoId || `video-${index}`;
+              const snippet = video.snippet || video;
+              
+              // Try to get statistics from multiple possible locations
+              const statistics = video.statistics || video.metrics || {};
+              
+              // For formatted videos from youtubeApi.js, metrics might be nested
+              const metricsData = video.metrics || {};
+              const finalStats = {
+                viewCount: statistics.viewCount || metricsData.viewCount || '0',
+                likeCount: statistics.likeCount || metricsData.likeCount || '0',
+                commentCount: statistics.commentCount || metricsData.commentCount || '0'
+              };
+              
+              console.log('Final statistics for processing:', {
+                videoId,
+                finalStats,
+                originalStats: statistics,
+                originalMetrics: metricsData
+              });
+              
+              if (!videoId) {
+                console.error('No video ID found for video:', video);
+                return null;
               }
-            };
-          });
+              
+              const views = parseViewCount(finalStats.viewCount);
+              const engagement = calculateEngagement(finalStats);
+              
+              console.log('Calculated metrics:', {
+                videoId,
+                title: snippet.title,
+                views,
+                engagement,
+                rawViewCount: finalStats.viewCount
+              });
+              
+              const row = Math.floor(index / platformLayout.columns);
+              const col = index % platformLayout.columns;
+              
+              return {
+                id: createShapeId(`youtube-${videoId}`),
+                type: 'youtube-thumbnail',
+                x: platformLayout.startX + col * (platformLayout.itemWidth + platformLayout.spacing),
+                y: platformLayout.startY + row * (platformLayout.itemHeight + platformLayout.spacing),
+                props: {
+                  videoId: videoId,
+                  title: snippet.title || 'Unknown Title',
+                  thumbnailUrl: getBestThumbnailUrl(video),
+                  channelName: snippet.channelTitle || snippet.channelName || 'Unknown Channel',
+                  views: views,
+                  engagement: engagement,
+                  isViral: isVideoViral(finalStats),
+                  zScore: calculateZScore(finalStats),
+                  w: platformLayout.itemWidth,
+                  h: platformLayout.itemHeight,
+                  locked: false,
+                  showMetrics: true
+                }
+              };
+            });
+          }
 
           // Filter out any null shapes
           const validShapes = shapes.filter(shape => shape !== null);

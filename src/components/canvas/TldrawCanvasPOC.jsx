@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Tldraw, createShapeId, ShapeUtil, HTMLContainer, T, Rectangle2d } from '@tldraw/tldraw';
 import '@tldraw/tldraw/tldraw.css';
+import { TikTokShapeUtil } from './shapes/TikTokShapeUtil';
 
 // Mock YouTube data for demonstration
 const mockYouTubeData = [
@@ -237,7 +238,7 @@ const TldrawCanvasPOC = () => {
   const [selectedThumbnails, setSelectedThumbnails] = useState(new Set());
 
   // Custom shape utilities
-  const shapeUtils = useMemo(() => [ThumbnailShapeUtil], []);
+  const shapeUtils = useMemo(() => [ThumbnailShapeUtil, TikTokShapeUtil], []);
 
   // Initialize with sample YouTube thumbnails
   useEffect(() => {

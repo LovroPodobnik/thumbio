@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Tldraw, createShapeId, ShapeUtil, HTMLContainer, T, Rectangle2d, TldrawUi, useEditor } from '@tldraw/tldraw';
 import '@tldraw/tldraw/tldraw.css';
+import { TikTokShapeUtil } from './shapes/TikTokShapeUtil';
 
 // Pure YouTube data - no complex state management
 const mockYouTubeData = [
@@ -248,8 +249,8 @@ class ThumbnailShapeUtil extends ShapeUtil {
 const TldrawCanvasPure = () => {
   const [editor, setEditor] = useState(null);
 
-  // Only tldraw shape utils
-  const shapeUtils = useMemo(() => [ThumbnailShapeUtil], []);
+  // Custom shape utilities
+  const shapeUtils = useMemo(() => [ThumbnailShapeUtil, TikTokShapeUtil], []);
 
   // Initialize with sample data using only tldraw APIs
   useEffect(() => {

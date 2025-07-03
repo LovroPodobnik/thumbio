@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
-import * as Separator from '@radix-ui/react-separator';
-import { ChevronRight, Plus, Settings, Home, Image, Users, Layers, Move, ZoomIn, MousePointer, MessageSquare } from 'lucide-react';
+import { ChevronRight, Plus, Settings, Layers, Activity } from 'lucide-react';
 import { cn } from '../../lib/utils';
+
+// Import platform system for status monitoring
+import { ensureInitialized, getPlatformSystemStatus } from '../../services/platforms/index.js';
 
 const MainSidebar = ({
   isOpen = false,
@@ -12,11 +14,12 @@ const MainSidebar = ({
   onWidthChange,
   minWidth = 200,
   maxWidth = 400,
-  // Add content callback
+  // Add content callback - triggers multiplatform import
   onAddContent
 }) => {
   const [isResizing, setIsResizing] = useState(false);
   const [currentWidth, setCurrentWidth] = useState(width);
+  const [platformStatus, setPlatformStatus] = useState(null);
   const sidebarRef = useRef(null);
   const resizeHandleRef = useRef(null);
 
@@ -26,6 +29,24 @@ const MainSidebar = ({
   useEffect(() => {
     setCurrentWidth(isOpen ? width : collapsedWidth);
   }, [isOpen, width]);
+
+  // Initialize platform system and monitor status
+  useEffect(() => {
+    try {
+      ensureInitialized();
+      const status = getPlatformSystemStatus();
+      setPlatformStatus(status);
+    } catch (error) {
+      console.error('[MainSidebar] Failed to initialize platform system:', error);
+      setPlatformStatus({ 
+        total: 0, 
+        enabled: 0, 
+        disabled: 0, 
+        errors: ['Platform system initialization failed'], 
+        warnings: [] 
+      });
+    }
+  }, []);
 
   // Resize functionality
   const handleMouseDown = (e) => {
@@ -67,11 +88,6 @@ const MainSidebar = ({
     };
   }, [isResizing]);
 
-  const navigationItems = [
-    { id: 'home', icon: Home, label: 'Home', active: false },
-    { id: 'thumbnails', icon: Image, label: 'Thumbnails', active: true },
-    { id: 'team', icon: Users, label: 'Team', active: false },
-  ];
 
   // Create the Thumbio logo component - Dark theme design
   const ThumbioLogo = ({ collapsed = false }) => (
@@ -173,19 +189,39 @@ const MainSidebar = ({
                   {isOpen ? (
                     <button
                       onClick={onAddContent}
-                      className="w-full px-3.5 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-500 transition-all flex items-center gap-1.5 shadow-sm"
+                      className="w-full px-3.5 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-500 transition-all flex items-center gap-1.5 shadow-sm relative"
                     >
                       <Plus className="w-3.5 h-3.5 flex-shrink-0" />
                       <span>Add Content</span>
+                      {/* Platform status indicator */}
+                      {platformStatus && (
+                        <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full border border-white">
+                          {platformStatus.enabled > 0 ? (
+                            <div className="w-full h-full bg-green-500 rounded-full" />
+                          ) : (
+                            <div className="w-full h-full bg-yellow-500 rounded-full" />
+                          )}
+                        </div>
+                      )}
                     </button>
                   ) : (
-                    <div className="w-8 h-8 mx-auto">
+                    <div className="w-8 h-8 mx-auto relative">
                       <button
                         onClick={onAddContent}
                         className="w-full h-full bg-blue-600 text-white rounded-md hover:bg-blue-500 transition-all flex items-center justify-center shadow-sm"
                       >
                         <Plus className="w-4 h-4 flex-shrink-0" />
                       </button>
+                      {/* Platform status indicator for collapsed mode */}
+                      {platformStatus && (
+                        <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border border-gray-900">
+                          {platformStatus.enabled > 0 ? (
+                            <div className="w-full h-full bg-green-500 rounded-full" />
+                          ) : (
+                            <div className="w-full h-full bg-yellow-500 rounded-full" />
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </Tooltip.Trigger>
@@ -195,110 +231,23 @@ const MainSidebar = ({
                     sideOffset={5}
                     side="right"
                   >
-                    Add new content
+                    <div className="space-y-1">
+                      <div>Add new content</div>
+                      {platformStatus && (
+                        <div className="text-gray-400">
+                          {platformStatus.enabled} platform{platformStatus.enabled !== 1 ? 's' : ''} available
+                        </div>
+                      )}
+                    </div>
                     <Tooltip.Arrow className="fill-gray-800" />
                   </Tooltip.Content>
                 </Tooltip.Portal>
               </Tooltip.Root>
             </div>
 
-            {/* Navigation Items */}
-            {isOpen && (
-              <div className="mb-8">
-                <h3 className="text-base font-medium text-white mb-3">Workspace</h3>
-                <div className="space-y-1">
-                  {navigationItems.map((item) => (
-                    <button
-                      key={item.id}
-                      className={cn(
-                        "w-full flex items-center gap-3 p-3 rounded-lg border border-gray-700",
-                        "transition-colors text-left",
-                        item.active
-                          ? "bg-gray-800 border-blue-500/50 text-white"
-                          : "hover:bg-gray-800 text-gray-300 hover:text-white"
-                      )}
-                    >
-                      <item.icon className={cn("w-4 h-4", item.active ? "text-blue-400" : "text-gray-400")} />
-                      <span className="text-sm font-medium">{item.label}</span>
-                      {item.active && (
-                        <span className="ml-auto text-[11px] px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded font-medium">
-                          ACTIVE
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
 
-            {/* Collapsed Navigation - FIXED: exact same container wrapper as logo */}
-            {!isOpen && (
-              <div className="space-y-3 mb-8">
-                {navigationItems.map((item) => (
-                  <Tooltip.Root key={item.id}>
-                    <Tooltip.Trigger asChild>
-                      <div className="w-8 h-8 mx-auto">
-                        <button
-                          className={cn(
-                            "w-full h-full flex items-center justify-center rounded-lg transition-colors",
-                            item.active
-                              ? "bg-gray-800 border border-blue-500/50"
-                              : "hover:bg-gray-800"
-                          )}
-                        >
-                          <item.icon className={cn("w-4 h-4 flex-shrink-0", item.active ? "text-blue-400" : "text-gray-400")} />
-                        </button>
-                      </div>
-                    </Tooltip.Trigger>
-                    <Tooltip.Portal>
-                      <Tooltip.Content 
-                        className="bg-gray-800 text-white text-xs px-2 py-1 rounded shadow-lg border border-gray-600"
-                        sideOffset={5}
-                        side="right"
-                      >
-                        {item.label}
-                        <Tooltip.Arrow className="fill-gray-800" />
-                      </Tooltip.Content>
-                    </Tooltip.Portal>
-                  </Tooltip.Root>
-                ))}
-              </div>
-            )}
 
-            {/* Quick Start Guide */}
-            {isOpen && (
-              <div className="mb-8">
-                <h3 className="text-base font-medium text-white mb-3">Quick Start</h3>
-                <div className="space-y-2.5">
-                  <div className="flex items-center gap-3">
-                    <Move className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-300">
-                      <span className="font-medium text-white">Navigate</span> – Hold Space + drag
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <ZoomIn className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-300">
-                      <span className="font-medium text-white">Zoom</span> – Scroll or pinch
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <MousePointer className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-300">
-                      <span className="font-medium text-white">Select</span> – Click or drag
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <MessageSquare className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-300">
-                      <span className="font-medium text-white">Comment</span> – Press C
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
 
-            {isOpen && <Separator.Root className="bg-gray-700 h-px w-full mb-6" />}
 
 
           </ScrollArea.Viewport>

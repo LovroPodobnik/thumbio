@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { FigmaStyleCanvasRefactored } from './components/canvas';
-import MultiplayerTest from './components/MultiplayerTest';
 import TldrawCanvasPOC from './components/canvas/TldrawCanvasPOC';
 import TldrawCanvasIntegrated from './components/canvas/TldrawCanvasIntegrated';
 import TldrawCanvasPure from './components/canvas/TldrawCanvasPure';
 import TldrawCanvasHybrid from './components/canvas/TldrawCanvasHybrid';
+// TikTok functionality removed
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,21 +17,21 @@ const queryClient = new QueryClient({
 
 function App() {
   // Simple route state for testing
-  const [showMultiplayerTest, setShowMultiplayerTest] = useState(false);
   const [showTldrawPOC, setShowTldrawPOC] = useState(false);
   const [showTldrawIntegrated, setShowTldrawIntegrated] = useState(false);
   const [showTldrawPure, setShowTldrawPure] = useState(false);
   const [showTldrawHybrid, setShowTldrawHybrid] = useState(false);
+  // TikTok functionality removed
 
   // Check URL params for test mode
   React.useEffect(() => {
     const handleURLChange = () => {
       const params = new URLSearchParams(window.location.search);
-      setShowMultiplayerTest(params.get('test') === 'multiplayer');
       setShowTldrawPOC(params.get('test') === 'tldraw');
       setShowTldrawIntegrated(params.get('test') === 'integrated');
       setShowTldrawPure(params.get('test') === 'pure');
       setShowTldrawHybrid(params.get('test') === 'hybrid');
+      // TikTok test route removed
     };
 
     handleURLChange();
@@ -46,23 +45,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <div className="min-h-screen bg-background-primary">
-        {showMultiplayerTest ? (
-          <>
-            <div className="absolute top-4 right-4 z-50">
-              <button
-                onClick={() => {
-                  setShowMultiplayerTest(false);
-                  window.history.pushState({}, '', '/');
-                }}
-                className="px-4 py-2 bg-text-primary text-background-primary rounded-md 
-                         hover:bg-text-primary/90 transition-colors"
-              >
-                Back to Main App
-              </button>
-            </div>
-            <MultiplayerTest />
-          </>
-        ) : showTldrawPOC ? (
+        {showTldrawPOC ? (
           <>
             <div className="absolute top-4 right-4 z-50">
               <button

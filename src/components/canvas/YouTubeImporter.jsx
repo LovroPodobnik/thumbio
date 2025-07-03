@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { searchVideos, fetchChannelVideos, searchChannelsForAutocomplete } from '../../services/youtubeApi';
-import QuotaWarning from '../QuotaWarning';
+// QuotaWarning component was removed
 import { useQuotaStatus } from '../../hooks/useQuotaStatus';
 
 const YouTubeImporter = ({ onVideosImported, onClose, onCreateChannelHeader = null }) => {
@@ -386,7 +386,7 @@ const YouTubeImporter = ({ onVideosImported, onClose, onCreateChannelHeader = nu
         {activeTab === 'search' && (
           <div className="space-y-3">
             {/* Quota Warning */}
-            <QuotaWarning operationType="SEARCH" />
+            {/* QuotaWarning component was removed */}
             
             <div>
               <label className="block text-sm font-medium text-text-primary mb-2">
@@ -415,7 +415,7 @@ const YouTubeImporter = ({ onVideosImported, onClose, onCreateChannelHeader = nu
         {activeTab === 'channel' && (
           <div className="space-y-3">
             {/* Quota Warning */}
-            <QuotaWarning operationType="SEARCH" />
+            {/* QuotaWarning component was removed */}
             
             <div className="relative">
               <label className="block text-sm font-medium text-text-primary mb-2">

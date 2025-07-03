@@ -4,7 +4,7 @@ import '@tldraw/tldraw/tldraw.css';
 
 // Import existing state management
 import { CanvasStateProvider, useCanvasState } from '../../state/canvasState';
-import { useCanvasActions, useSelectionActions } from '../../hooks/useCanvasActions';
+// Note: useCanvasActions and useSelectionActions were removed as they were part of the old canvas system
 
 // Import the state bridge
 import { TldrawStateBridge } from './TldrawStateBridge';
@@ -14,6 +14,9 @@ import TldrawTopToolbar from './TldrawTopToolbar';
 import MainSidebar from './MainSidebar';
 import ContentImportSidebar from './ContentImportSidebar';
 import YouTubeImporter from './YouTubeImporter';
+
+// Import TikTok shape utility
+import { TikTokShapeUtil } from './shapes/TikTokShapeUtil';
 
 // Define the thumbnail shape type with proper validators
 const thumbnailShapeProps = {
@@ -188,7 +191,8 @@ class ThumbnailShapeUtil extends ShapeUtil {
       width: shape.props.w,
       height: shape.props.h,
       x: 0,
-      y: 0
+      y: 0,
+      isFilled: true  // Ensure the entire shape is clickable
     })
   }
   
@@ -228,8 +232,7 @@ const TldrawCanvasIntegratedInternal = () => {
 
   // Get state and actions from existing context
   const state = useCanvasState();
-  const canvasActions = useCanvasActions();
-  const selectionActions = useSelectionActions();
+  // Removed useCanvasActions and useSelectionActions - old canvas system hooks
 
   // Extract data from existing state
   const { 
@@ -250,18 +253,14 @@ const TldrawCanvasIntegratedInternal = () => {
   } = state;
 
   // Custom shape utilities
-  const shapeUtils = useMemo(() => [ThumbnailShapeUtil], []);
+  const shapeUtils = useMemo(() => [ThumbnailShapeUtil, TikTokShapeUtil], []);
 
   // Initialize state bridge when editor is ready
   useEffect(() => {
     if (!editor) return;
 
-    // Create state bridge
-    stateBridgeRef.current = new TldrawStateBridge(
-      editor,
-      canvasActions,
-      selectionActions
-    );
+    // Create state bridge (simplified without old canvas actions)
+    stateBridgeRef.current = new TldrawStateBridge(editor);
 
     // Import existing YouTube thumbnails
     if (youtubeThumbnails.length > 0) {
@@ -277,7 +276,7 @@ const TldrawCanvasIntegratedInternal = () => {
         stateBridgeRef.current.destroy();
       }
     };
-  }, [editor, canvasActions, selectionActions]);
+  }, [editor]);
 
   // Sync new YouTube data when it changes
   useEffect(() => {
