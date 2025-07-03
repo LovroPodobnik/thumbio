@@ -102,8 +102,14 @@ const makeRequest = async (endpoint, params = {}) => {
   const data = await response.json();
   logger.log('[YouTube API] Response data:', data);
   
-  if (!data.status || (data.errorId && data.errorId !== 'Success')) {
-    throw new Error(`YouTube API error: ${data.errorId || 'Unknown error'}`);
+  // Check for error conditions - success is indicated by errorId: 'Success'
+  if (data.errorId && data.errorId !== 'Success') {
+    throw new Error(`YouTube API error: ${data.errorId}`);
+  }
+  
+  // Some endpoints might have status field, check it if present
+  if (data.status === false) {
+    throw new Error(`YouTube API error: ${data.errorId || 'Request failed'}`);
   }
   
   return data;
