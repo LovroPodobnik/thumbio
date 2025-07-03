@@ -58,15 +58,6 @@ export class YouTubePlatform extends PlatformPlugin {
         primary: false
       },
       {
-        id: 'search',
-        name: 'Search Videos',
-        description: 'Search YouTube for specific content',
-        icon: 'Search',
-        gradient: 'from-blue-600 to-blue-500',
-        hoverGradient: 'from-blue-500 to-blue-400',
-        primary: false
-      },
-      {
         id: 'trending',
         name: 'Trending Content',
         description: 'Import currently trending videos',

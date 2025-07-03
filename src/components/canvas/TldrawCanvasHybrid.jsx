@@ -48,9 +48,7 @@ const thumbnailShapeProps = {
 };
 
 // YouTube thumbnail component
-const ThumbnailShapeComponent = ({ shape, editor }) => {
-  const [currentTool, setCurrentTool] = useState(globalEditor?.getCurrentToolId());
-  
+const ThumbnailShapeComponent = ({ shape }) => {
   const { props } = shape;
   const { 
     thumbnailUrl, 
@@ -61,9 +59,11 @@ const ThumbnailShapeComponent = ({ shape, editor }) => {
     isViral, 
     w, 
     h, 
-    locked, 
     showMetrics 
   } = props;
+  
+  // Use tldraw's isLocked property instead of custom locked prop
+  const locked = shape.isLocked;
 
   const formatViews = (views) => {
     if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
@@ -71,38 +71,8 @@ const ThumbnailShapeComponent = ({ shape, editor }) => {
     return views.toString();
   };
 
-  // Listen for tool changes to update component reactively
-  useEffect(() => {
-    if (!globalEditor) return;
-    
-    const handleToolChange = () => {
-      setCurrentTool(globalEditor.getCurrentToolId());
-    };
-    
-    // Listen to editor changes for tool switches
-    globalEditor.on('change', handleToolChange);
-    
-    return () => {
-      globalEditor.off('change', handleToolChange);
-    };
-  }, []);
-
-  // Check current tool to determine pointer event behavior
-  const isHandTool = currentTool === 'hand';
-  
-  // Proper click handler following tldraw patterns
-  const handleThumbnailClick = (e) => {
-    if (!locked && globalEditor && !isHandTool) {
-      // Following tldraw documentation: stopPropagation for custom handling
-      e.stopPropagation();
-      globalEditor.select(shape.id);
-    }
-  };
-
   return (
     <div 
-      onClick={handleThumbnailClick}
-      onPointerDown={handleThumbnailClick}
       style={{ 
         width: w, 
         height: h, 
@@ -111,20 +81,20 @@ const ThumbnailShapeComponent = ({ shape, editor }) => {
         borderRadius: '8px',
         overflow: 'hidden',
         backgroundColor: '#f3f4f6',
-        cursor: locked ? 'not-allowed' : (isHandTool ? 'grab' : 'pointer'),
-        userSelect: 'none',
-        // When hand tool is active, let events pass through to enable canvas panning
-        pointerEvents: isHandTool ? 'none' : 'all'
+        userSelect: 'none'
+        // Note: No pointer-events or cursor styling here - let tldraw handle it
       }}
     >
       <img
         src={thumbnailUrl}
         alt={title}
+        draggable={false}  // Prevent native drag behavior
         style={{
           width: '100%',
           height: '100%',
           objectFit: 'cover',
           opacity: locked ? 0.6 : 1,
+          pointerEvents: 'none',  // Prevent image from being draggable
           userSelect: 'none',
           WebkitUserSelect: 'none',
           MozUserSelect: 'none',
@@ -141,7 +111,8 @@ const ThumbnailShapeComponent = ({ shape, editor }) => {
           top: '8px',
           right: '8px',
           display: 'flex',
-          gap: '4px'
+          gap: '4px',
+          pointerEvents: 'none'  // Prevent overlay from interfering with drawing
         }}>
           {isViral && (
             <span style={{
@@ -179,7 +150,8 @@ const ThumbnailShapeComponent = ({ shape, editor }) => {
         background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
         color: 'white',
         padding: '8px',
-        fontSize: '12px'
+        fontSize: '12px',
+        pointerEvents: 'none'  // Prevent overlay from interfering with drawing
       }}>
         <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>
           {title.length > 40 ? title.substring(0, 40) + '...' : title}
@@ -200,7 +172,8 @@ const ThumbnailShapeComponent = ({ shape, editor }) => {
           padding: '8px 12px',
           borderRadius: '6px',
           fontSize: '12px',
-          fontWeight: 'bold'
+          fontWeight: 'bold',
+          pointerEvents: 'none'  // Prevent overlay from interfering with drawing
         }}>
           🔒 LOCKED
         </div>
@@ -247,7 +220,7 @@ class ThumbnailShapeUtil extends ShapeUtil {
   component(shape) {
     return (
       <HTMLContainer>
-        <ThumbnailShapeComponent shape={shape} editor={globalEditor} />
+        <ThumbnailShapeComponent shape={shape} />
       </HTMLContainer>
     )
   }
@@ -257,7 +230,7 @@ class ThumbnailShapeUtil extends ShapeUtil {
       <rect 
         width={shape.props.w} 
         height={shape.props.h} 
-        stroke={shape.props.locked ? '#ef4444' : '#3b82f6'}
+        stroke={shape.isLocked ? '#ef4444' : '#3b82f6'}
         strokeWidth="2"
         fill="none"
       />
@@ -265,7 +238,7 @@ class ThumbnailShapeUtil extends ShapeUtil {
   }
   
   canEdit(shape) {
-    return !shape.props.locked
+    return !shape.isLocked
   }
   
   canBind() {
@@ -273,15 +246,15 @@ class ThumbnailShapeUtil extends ShapeUtil {
   }
   
   canSelect(shape) {
-    return !shape.props.locked;
+    return !shape.isLocked;
   }
   
   canResize(shape) {
-    return !shape.props.locked
+    return !shape.isLocked
   }
   
   canMove(shape) {
-    return !shape.props.locked
+    return !shape.isLocked
   }
 
   // Override hitTestPoint to ensure proper click detection
@@ -347,6 +320,14 @@ const TldrawCanvasHybrid = () => {
     const engagement = calculateEngagementForExamples(statistics);
     return Math.round((Math.log10(views + 1) + engagement / 10) * 100) / 100;
   }, [calculateEngagementForExamples]);
+
+  // Helper function to determine if a tool requires shapes to be locked
+  const shouldLockForTool = useCallback((toolId) => {
+    const drawingTools = ['draw', 'eraser', 'line', 'arrow', 'highlight'];
+    const navigationTools = ['select', 'hand', 'zoom'];
+    // Lock shapes for all drawing tools, unlock only for select tool
+    return drawingTools.includes(toolId) || !navigationTools.includes(toolId);
+  }, []);
 
   // Create example thumbnails for testing (saves API calls)
   const createExampleThumbnails = useCallback((editor) => {
@@ -488,11 +469,16 @@ const TldrawCanvasHybrid = () => {
         commentCount: video.comments
       });
 
+      // Check current tool to determine initial lock state
+      const currentTool = editor ? editor.getCurrentToolId() : 'select';
+      const shouldLockOnCreate = shouldLockForTool(currentTool);
+      
       return {
         id: createShapeId(`example-${video.id}`),
         type: 'youtube-thumbnail',
         x: 150 + (index % 4) * 360,
         y: 150 + Math.floor(index / 4) * 240,
+        isLocked: shouldLockOnCreate, // Set initial lock state based on current tool
         props: {
           videoId: video.id,
           title: video.title,
@@ -521,7 +507,109 @@ const TldrawCanvasHybrid = () => {
     setTimeout(() => {
       editor.zoomToFit();
     }, 100);
-  }, [calculateEngagementForExamples, calculateZScoreForExamples]);
+  }, [calculateEngagementForExamples, calculateZScoreForExamples, shouldLockForTool]);
+
+  // Function to update cursor styles based on drawing tool mode
+  const updateCursorStyles = useCallback((isDrawingToolActive) => {
+    // Remove existing pen tool cursor styles
+    const existingStyle = document.getElementById('pen-tool-cursor-styles');
+    if (existingStyle) {
+      existingStyle.remove();
+    }
+    
+    if (isDrawingToolActive) {
+      // Add cursor styles for drawing tool modes
+      const style = document.createElement('style');
+      style.id = 'pen-tool-cursor-styles';
+      style.textContent = `
+        /* Override cursor for thumbnail shapes when drawing tools are active */
+        .tl-canvas .tl-overlays .tl-overlay[data-testid*="youtube-"],
+        .tl-canvas .tl-overlays .tl-overlay[data-testid*="tiktok-"],
+        .tl-canvas .tl-shapes .tl-shape[data-testid*="youtube-"],
+        .tl-canvas .tl-shapes .tl-shape[data-testid*="tiktok-"] {
+          cursor: crosshair !important;
+        }
+        
+        /* Override hover effects on thumbnail shapes during drawing modes */
+        .tl-canvas .tl-overlays .tl-overlay[data-testid*="youtube-"]:hover,
+        .tl-canvas .tl-overlays .tl-overlay[data-testid*="tiktok-"]:hover,
+        .tl-canvas .tl-shapes .tl-shape[data-testid*="youtube-"]:hover,
+        .tl-canvas .tl-shapes .tl-shape[data-testid*="tiktok-"]:hover {
+          cursor: crosshair !important;
+        }
+        
+        /* Ensure canvas itself shows drawing cursor when over thumbnails for all drawing tools */
+        .tl-canvas[data-tool="draw"] .tl-overlays .tl-overlay[data-testid*="youtube-"],
+        .tl-canvas[data-tool="draw"] .tl-overlays .tl-overlay[data-testid*="tiktok-"],
+        .tl-canvas[data-tool="draw"] .tl-shapes .tl-shape[data-testid*="youtube-"],
+        .tl-canvas[data-tool="draw"] .tl-shapes .tl-shape[data-testid*="tiktok-"],
+        .tl-canvas[data-tool="eraser"] .tl-overlays .tl-overlay[data-testid*="youtube-"],
+        .tl-canvas[data-tool="eraser"] .tl-overlays .tl-overlay[data-testid*="tiktok-"],
+        .tl-canvas[data-tool="eraser"] .tl-shapes .tl-shape[data-testid*="youtube-"],
+        .tl-canvas[data-tool="eraser"] .tl-shapes .tl-shape[data-testid*="tiktok-"] {
+          cursor: crosshair !important;
+          pointer-events: none !important;
+        }
+      `;
+      document.head.appendChild(style);
+      
+      console.log('[Drawing Tool Cursor] Applied drawing tool cursor styles');
+    } else {
+      console.log('[Drawing Tool Cursor] Removed drawing tool cursor styles');
+    }
+  }, []);
+
+  // Tool change handler for locking/unlocking thumbnail shapes during drawing tool use
+  const handleToolChange = useCallback((toolId, editorInstance) => {
+    if (!editorInstance) return;
+    
+    try {
+      // Get all YouTube and TikTok thumbnail shapes
+      const allShapes = editorInstance.getCurrentPageShapes();
+      const thumbnailShapes = allShapes.filter(shape => 
+        shape.type === 'youtube-thumbnail' || shape.type === 'tiktok-video'
+      );
+      
+      if (thumbnailShapes.length === 0) return;
+      
+      // Determine if shapes should be locked based on tool
+      const shouldLock = shouldLockForTool(toolId);
+      
+      // Update all thumbnail shapes with the new lock state
+      const shapesToUpdate = thumbnailShapes.map(shape => ({
+        id: shape.id,
+        type: shape.type,
+        isLocked: shouldLock
+      }));
+      
+      editorInstance.updateShapes(shapesToUpdate);
+      
+      // Update cursor styles for drawing tool modes
+      updateCursorStyles(shouldLock);
+      
+      console.log(`[Drawing Tool Lock] ${shouldLock ? 'Locked' : 'Unlocked'} ${thumbnailShapes.length} thumbnail shapes (tool: ${toolId})`);
+      
+    } catch (error) {
+      console.warn('[Drawing Tool Lock] Error updating shape lock state:', error);
+    }
+  }, [shouldLockForTool, updateCursorStyles]);
+
+  // UI event handler for tool changes
+  const handleUiEvent = useCallback((name, data) => {
+    if (name === 'select-tool' && data?.id && editor) {
+      handleToolChange(data.id, editor);
+    }
+  }, [editor, handleToolChange]);
+
+  // Cleanup cursor styles on unmount
+  useEffect(() => {
+    return () => {
+      const existingStyle = document.getElementById('pen-tool-cursor-styles');
+      if (existingStyle) {
+        existingStyle.remove();
+      }
+    };
+  }, []);
 
   // Enhanced editor mount handler
   const handleEditorMount = useCallback((editorInstance) => {
@@ -758,11 +846,16 @@ const TldrawCanvasHybrid = () => {
               const row = Math.floor(index / platformLayout.columns);
               const col = index % platformLayout.columns;
               
+              // Check current tool to determine initial lock state
+              const currentTool = editor ? editor.getCurrentToolId() : 'select';
+              const shouldLockOnCreate = shouldLockForTool(currentTool);
+              
               return {
                 id: createShapeId(`tiktok-${video.id}`),
                 type: 'tiktok-video',
                 x: platformLayout.startX + col * (platformLayout.itemWidth + platformLayout.spacing),
                 y: platformLayout.startY + row * (platformLayout.itemHeight + platformLayout.spacing),
+                isLocked: shouldLockOnCreate, // Set initial lock state based on current tool
                 props: {
                   videoId: video.id,
                   title: video.title || 'TikTok Video',
@@ -840,11 +933,16 @@ const TldrawCanvasHybrid = () => {
               const row = Math.floor(index / platformLayout.columns);
               const col = index % platformLayout.columns;
               
+              // Check current tool to determine initial lock state
+              const currentTool = editor ? editor.getCurrentToolId() : 'select';
+              const shouldLockOnCreate = shouldLockForTool(currentTool);
+              
               return {
                 id: createShapeId(`youtube-${videoId}`),
                 type: 'youtube-thumbnail',
                 x: platformLayout.startX + col * (platformLayout.itemWidth + platformLayout.spacing),
                 y: platformLayout.startY + row * (platformLayout.itemHeight + platformLayout.spacing),
+                isLocked: shouldLockOnCreate, // Set initial lock state based on current tool
                 props: {
                   videoId: videoId,
                   title: snippet.title || 'Unknown Title',
@@ -893,17 +991,39 @@ const TldrawCanvasHybrid = () => {
   // YouTube data processing functions (simplified from existing code)
   const getBestThumbnailUrl = (video) => {
     // Handle different possible data structures
-    const thumbnails = video.snippet?.thumbnails || video.thumbnails;
     
-    if (!thumbnails) {
-      console.warn('No thumbnails found for video:', video);
-      return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIwIiBoZWlnaHQ9IjE4MCIgdmlld0JveD0iMCAwIDMyMCAxODAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMjAiIGhlaWdodD0iMTgwIiBmaWxsPSIjRkFGQUZBIi8+CjxwYXRoIGQ9Ik0xNDQuNSA5MEwxNjggNzguNVYxMDEuNUwxNDQuNSA5MFoiIGZpbGw9IiM5Q0EzQUYiLz4KPHN2Zz4K';
+    // Official YouTube API v3 format: video.thumbnail (direct URL string from our formatter)
+    if (video.thumbnail && typeof video.thumbnail === 'string') {
+      return video.thumbnail;
     }
     
-    if (thumbnails.maxres) return thumbnails.maxres.url;
-    if (thumbnails.high) return thumbnails.high.url;
-    if (thumbnails.medium) return thumbnails.medium.url;
-    return thumbnails.default?.url || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIwIiBoZWlnaHQ9IjE4MCIgdmlld0JveD0iMCAwIDMyMCAxODAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMjAiIGhlaWdodD0iMTgwIiBmaWxsPSIjRkFGQUZBIi8+CjxwYXRoIGQ9Ik0xNDQuNSA5MEwxNjggNzguNVYxMDEuNUwxNDQuNSA5MFoiIGZpbGw9IiM5Q0EzQUYiLz4KPHN2Zz4K';
+    // Official YouTube API v3 format: video.snippet.thumbnails (object)
+    const thumbnails = video.snippet?.thumbnails || video.thumbnails;
+    if (thumbnails && typeof thumbnails === 'object' && !Array.isArray(thumbnails)) {
+      if (thumbnails.maxres) return thumbnails.maxres.url;
+      if (thumbnails.standard) return thumbnails.standard.url;
+      if (thumbnails.high) return thumbnails.high.url;
+      if (thumbnails.medium) return thumbnails.medium.url;
+      if (thumbnails.default) return thumbnails.default.url;
+    }
+    
+    // Fallback: Array format (from our formatter)
+    if (video.thumbnails && Array.isArray(video.thumbnails)) {
+      const thumbnailsArray = video.thumbnails;
+      if (thumbnailsArray.length > 0) {
+        const bestThumbnail = thumbnailsArray[thumbnailsArray.length - 1];
+        if (bestThumbnail?.url) return bestThumbnail.url;
+      }
+    }
+    
+    console.warn('No thumbnails found for video:', {
+      videoId: video.id || video.videoId,
+      availableFields: Object.keys(video),
+      thumbnail: video.thumbnail,
+      thumbnails: video.thumbnails,
+      snippet: video.snippet
+    });
+    return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIwIiBoZWlnaHQ9IjE4MCIgdmlld0JveD0iMCAwIDMyMCAxODAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMjAiIGhlaWdodD0iMTgwIiBmaWxsPSIjRkFGQUZBIi8+CjxwYXRoIGQ9Ik0xNDQuNSA5MEwxNjggNzguNVYxMDEuNUwxNDQuNSA5MFoiIGZpbGw9IiM5Q0EzQUYiLz4KPHN2Zz4K';
   };
 
   const parseViewCount = (viewCountStr) => {
@@ -993,6 +1113,7 @@ const TldrawCanvasHybrid = () => {
           <div style={{ position: 'relative', width: '100%', height: '100%' }}>
             <Tldraw 
               onMount={handleEditorMount}
+              onUiEvent={handleUiEvent}
               shapeUtils={shapeUtils}
               hideUi={false}
               components={tldrawComponents}

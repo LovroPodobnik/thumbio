@@ -1,12 +1,33 @@
-// YouTube Media Downloader API Service (RapidAPI)
+// Official Google YouTube Data API v3 Service with API Key Rotation
 import quotaTracker from './quotaTracker';
 
-const RAPIDAPI_KEY = process.env.REACT_APP_YOUTUBE_API_KEY; // Updated to use the correct env var
-const BASE_URL = 'https://youtube-media-downloader.p.rapidapi.com';
+// Multiple API keys for quota management
+const API_KEYS = [
+  process.env.REACT_APP_YOUTUBE_API_KEY,
+  process.env.REACT_APP_YOUTUBE_API_KEY_SECOND,
+  process.env.REACT_APP_YOUTUBE_API_KEY_THIRD
+].filter(key => key && key !== 'your_youtube_api_key_here');
 
-// Check if RapidAPI key is configured
-if (!RAPIDAPI_KEY || RAPIDAPI_KEY === 'your_rapidapi_key_here') {
-  console.error('[YouTube API] Error: RapidAPI key is not configured. Please add REACT_APP_YOUTUBE_API_KEY to your .env file');
+const BASE_URL = 'https://www.googleapis.com/youtube/v3';
+
+// API Key rotation state
+const API_KEY_STATE = {
+  currentIndex: 0,
+  usageCount: {},
+  failureCount: {},
+  lastRotation: Date.now(),
+  rotationThreshold: 50 // Rotate after 50 requests
+};
+
+// Initialize usage tracking for each key
+API_KEYS.forEach((key, index) => {
+  API_KEY_STATE.usageCount[index] = 0;
+  API_KEY_STATE.failureCount[index] = 0;
+});
+
+// Check if we have valid API keys
+if (API_KEYS.length === 0) {
+  console.error('[YouTube API] Error: No valid YouTube API keys configured. Please add REACT_APP_YOUTUBE_API_KEY to your .env file');
 }
 
 // Debug flag - set to false in production
@@ -39,6 +60,61 @@ const resetUsageIfNeeded = () => {
   }
 };
 
+/**
+ * Get the current active API key
+ * @returns {string} Current API key
+ */
+const getCurrentApiKey = () => {
+  if (API_KEYS.length === 0) {
+    throw new Error('No YouTube API keys available');
+  }
+  return API_KEYS[API_KEY_STATE.currentIndex];
+};
+
+/**
+ * Rotate to the next API key
+ * @param {string} reason - Reason for rotation
+ */
+const rotateApiKey = (reason = 'usage_threshold') => {
+  const oldIndex = API_KEY_STATE.currentIndex;
+  API_KEY_STATE.currentIndex = (API_KEY_STATE.currentIndex + 1) % API_KEYS.length;
+  API_KEY_STATE.lastRotation = Date.now();
+  
+  logger.log(`[YouTube API] Rotated API key: ${oldIndex} → ${API_KEY_STATE.currentIndex} (${reason})`);
+  logger.log(`[YouTube API] Key usage stats:`, {
+    key0: `${API_KEY_STATE.usageCount[0]} requests, ${API_KEY_STATE.failureCount[0]} failures`,
+    key1: `${API_KEY_STATE.usageCount[1]} requests, ${API_KEY_STATE.failureCount[1]} failures`,
+    key2: `${API_KEY_STATE.usageCount[2]} requests, ${API_KEY_STATE.failureCount[2]} failures`
+  });
+};
+
+/**
+ * Check if current API key should be rotated
+ */
+const checkKeyRotation = () => {
+  const currentUsage = API_KEY_STATE.usageCount[API_KEY_STATE.currentIndex];
+  const currentFailures = API_KEY_STATE.failureCount[API_KEY_STATE.currentIndex];
+  
+  // Rotate if usage threshold reached
+  if (currentUsage >= API_KEY_STATE.rotationThreshold) {
+    rotateApiKey('usage_threshold');
+    return;
+  }
+  
+  // Rotate if too many failures (more than 5)
+  if (currentFailures >= 5) {
+    rotateApiKey('failure_threshold');
+    return;
+  }
+  
+  // Rotate if key has been used for more than 1 hour
+  const timeSinceRotation = Date.now() - API_KEY_STATE.lastRotation;
+  if (timeSinceRotation > 60 * 60 * 1000) { // 1 hour
+    rotateApiKey('time_threshold');
+    return;
+  }
+};
+
 // Check if we can make a request with quota checking
 const canMakeRequest = (operationType = 'SEARCH') => {
   resetUsageIfNeeded();
@@ -55,67 +131,121 @@ const canMakeRequest = (operationType = 'SEARCH') => {
     throw new Error('Daily API quota exceeded. Please try again tomorrow.');
   }
   
-  if (!RAPIDAPI_KEY) {
-    throw new Error('RapidAPI key is not configured. Please add REACT_APP_YOUTUBE_API_KEY to your environment variables.');
+  if (API_KEYS.length === 0) {
+    throw new Error('No YouTube API keys configured. Please add API keys to your environment variables.');
   }
+  
+  // Check if we need to rotate API keys
+  checkKeyRotation();
   
   return true;
 };
 
 // Track API request and add delay to prevent rate limiting
-const trackRequest = async () => {
+const trackRequest = async (success = true) => {
   API_USAGE.requests++;
-  logger.log(`[API Safety] Request #${API_USAGE.requests} made. Rate: ${(API_USAGE.requests / Math.max((Date.now() - API_USAGE.lastReset) / (1000 * 60 * 60), 1)).toFixed(1)} req/hour`);
+  
+  // Track usage per API key
+  API_KEY_STATE.usageCount[API_KEY_STATE.currentIndex]++;
+  
+  if (!success) {
+    API_KEY_STATE.failureCount[API_KEY_STATE.currentIndex]++;
+  }
+  
+  logger.log(`[API Safety] Request #${API_USAGE.requests} made with key ${API_KEY_STATE.currentIndex}. Rate: ${(API_USAGE.requests / Math.max((Date.now() - API_USAGE.lastReset) / (1000 * 60 * 60), 1)).toFixed(1)} req/hour`);
   
   // Add small delay to prevent rate limiting (250ms between requests)
   await new Promise(resolve => setTimeout(resolve, 250));
 };
 
-// Common headers for all requests
-const getHeaders = () => ({
-  'x-rapidapi-key': RAPIDAPI_KEY,
-  'x-rapidapi-host': 'youtube-media-downloader.p.rapidapi.com'
-});
-
-// Make API request with error handling
-const makeRequest = async (endpoint, params = {}) => {
-  canMakeRequest();
-  await trackRequest();
+// Make API request with error handling and automatic retry with key rotation
+const makeRequest = async (endpoint, params = {}, retryCount = 0) => {
+  const maxRetries = Math.min(3, API_KEYS.length);
   
-  const url = new URL(`${BASE_URL}${endpoint}`);
-  Object.keys(params).forEach(key => {
-    if (params[key] !== undefined && params[key] !== null) {
-      url.searchParams.append(key, params[key]);
+  try {
+    canMakeRequest();
+    
+    const currentKey = getCurrentApiKey();
+    const url = new URL(`${BASE_URL}${endpoint}`);
+    
+    // Add API key to all requests
+    url.searchParams.append('key', currentKey);
+    
+    // Add other parameters
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null) {
+        url.searchParams.append(key, params[key]);
+      }
+    });
+    
+    logger.log(`[YouTube API] Request URL (key ${API_KEY_STATE.currentIndex}):`, url.toString().replace(currentKey, 'KEY_HIDDEN'));
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error('[YouTube API] Error response:', errorText);
+      
+      // Track failed request
+      await trackRequest(false);
+      
+      // Check if it's a quota or auth error that might be resolved by key rotation
+      const isRetryableError = response.status === 403 || response.status === 429 || response.status === 400;
+      
+      if (isRetryableError && retryCount < maxRetries) {
+        logger.warn(`[YouTube API] Retryable error (${response.status}), rotating API key and retrying...`);
+        rotateApiKey('api_error');
+        return makeRequest(endpoint, params, retryCount + 1);
+      }
+      
+      throw new Error(`YouTube API request failed: ${response.status} - ${errorText}`);
     }
-  });
-  
-  logger.log('[YouTube API] Request URL:', url.toString());
-  
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: getHeaders()
-  });
-  
-  if (!response.ok) {
-    const errorText = await response.text();
-    logger.error('[YouTube API] Error response:', errorText);
-    throw new Error(`YouTube API request failed: ${response.status} - ${errorText}`);
+    
+    const data = await response.json();
+    logger.log('[YouTube API] Response data received successfully');
+    
+    // Check for YouTube API error conditions
+    if (data.error) {
+      // Track failed request
+      await trackRequest(false);
+      
+      // Check if it's a quota or auth error
+      const isRetryableError = data.error.code === 403 || data.error.code === 429 || data.error.code === 400;
+      
+      if (isRetryableError && retryCount < maxRetries) {
+        logger.warn(`[YouTube API] API error (${data.error.code}), rotating API key and retrying...`);
+        rotateApiKey('api_error');
+        return makeRequest(endpoint, params, retryCount + 1);
+      }
+      
+      throw new Error(`YouTube API error: ${data.error.message}`);
+    }
+    
+    // Track successful request
+    await trackRequest(true);
+    
+    return data;
+    
+  } catch (error) {
+    // Track failed request if not already tracked
+    if (!error.message.includes('YouTube API request failed') && !error.message.includes('YouTube API error')) {
+      await trackRequest(false);
+    }
+    
+    // If it's a network or other error, try rotating key and retrying
+    if (retryCount < maxRetries && API_KEYS.length > 1) {
+      logger.warn(`[YouTube API] Request failed (${error.message}), rotating API key and retrying...`);
+      rotateApiKey('request_error');
+      return makeRequest(endpoint, params, retryCount + 1);
+    }
+    
+    throw error;
   }
-  
-  const data = await response.json();
-  logger.log('[YouTube API] Response data:', data);
-  
-  // Check for error conditions - success is indicated by errorId: 'Success'
-  if (data.errorId && data.errorId !== 'Success') {
-    throw new Error(`YouTube API error: ${data.errorId}`);
-  }
-  
-  // Some endpoints might have status field, check it if present
-  if (data.status === false) {
-    throw new Error(`YouTube API error: ${data.errorId || 'Request failed'}`);
-  }
-  
-  return data;
 };
 
 /**
@@ -127,14 +257,16 @@ export const getVideoDetails = async (videoId) => {
   logger.log('[YouTube API] Getting video details for:', videoId);
   
   try {
-    const data = await makeRequest('/v2/video/details', {
-      videoId,
-      urlAccess: 'normal',
-      videos: 'auto',
-      audios: 'auto'
+    const data = await makeRequest('/videos', {
+      id: videoId,
+      part: 'snippet,statistics,contentDetails'
     });
     
-    return formatVideoDetailsData(data);
+    if (!data.items || data.items.length === 0) {
+      throw new Error(`Video not found: ${videoId}`);
+    }
+    
+    return formatVideoDetailsData(data.items[0]);
   } catch (error) {
     logger.error('[YouTube API] Error getting video details:', error);
     throw error;
@@ -167,40 +299,32 @@ export const searchVideos = async (query, maxResults = 20, sortBy = 'relevance')
         break;
     }
     
-    const data = await makeRequest('/v2/search/videos', {
-      keyword: query,
-      uploadDate: 'all',
-      duration: 'all',
-      sortBy: apiSortBy
+    const searchData = await makeRequest('/search', {
+      q: query,
+      part: 'snippet',
+      type: 'video',
+      maxResults: maxResults,
+      order: apiSortBy
     });
     
-    if (!data.items || data.items.length === 0) {
-      logger.warn('[YouTube API] No items returned from search');
+    if (!searchData.items || searchData.items.length === 0) {
+      logger.warn('[YouTube API] No videos returned from search');
       return [];
     }
     
-    // Get detailed information for each video (with limited concurrency to avoid rate limits)
-    const videos = data.items.slice(0, maxResults);
-    const videoDetails = [];
+    // Get video IDs for detailed information
+    const videoIds = searchData.items.map(item => item.id.videoId).join(',');
     
-    // Process videos in batches of 3 to avoid rate limiting
-    for (let i = 0; i < videos.length; i += 3) {
-      const batch = videos.slice(i, i + 3);
-      const batchPromises = batch.map(async (item) => {
-        try {
-          return await getVideoDetails(item.id);
-        } catch (error) {
-          logger.warn(`[YouTube API] Failed to get details for video ${item.id}:`, error.message);
-          return formatSearchItemData(item);
-        }
-      });
-      
-      const batchResults = await Promise.all(batchPromises);
-      videoDetails.push(...batchResults);
-    }
+    // Get detailed video information including statistics
+    const videoDetails = await makeRequest('/videos', {
+      id: videoIds,
+      part: 'snippet,statistics,contentDetails'
+    });
     
-    // Sort videos based on the specified criteria (client-side sorting)
-    const sortedVideos = sortVideos(videoDetails.filter(v => v), sortBy);
+    const formattedVideos = videoDetails.items.map(formatVideoDetailsData).filter(v => v);
+    
+    // Sort videos based on the specified criteria (client-side sorting for some options)
+    const sortedVideos = sortVideos(formattedVideos, sortBy);
     logger.log('[YouTube API] Videos sorted by:', sortBy);
     logger.log('[YouTube API] Final sorted videos:', sortedVideos);
     
@@ -221,17 +345,28 @@ export const searchChannels = async (query, maxResults = 10) => {
   logger.log('[YouTube API] Searching channels with query:', query);
   
   try {
-    const data = await makeRequest('/v2/search/channels', {
-      keyword: query,
-      sortBy: 'relevance'
+    const searchData = await makeRequest('/search', {
+      q: query,
+      part: 'snippet',
+      type: 'channel',
+      maxResults: maxResults
     });
     
-    if (!data.items || data.items.length === 0) {
+    if (!searchData.items || searchData.items.length === 0) {
       logger.warn('[YouTube API] No channels found');
       return [];
     }
     
-    return data.items.slice(0, maxResults).map(formatChannelSearchData);
+    // Get channel IDs for detailed information
+    const channelIds = searchData.items.map(item => item.id.channelId).join(',');
+    
+    // Get detailed channel information including statistics
+    const channelDetails = await makeRequest('/channels', {
+      id: channelIds,
+      part: 'snippet,statistics'
+    });
+    
+    return channelDetails.items.map(formatChannelSearchData);
   } catch (error) {
     logger.error('[YouTube API] Error searching channels:', error);
     throw error;
@@ -247,11 +382,16 @@ export const getChannelDetails = async (channelId) => {
   logger.log('[YouTube API] Getting channel details for:', channelId);
   
   try {
-    const data = await makeRequest('/v2/channel/details', {
-      channelId
+    const data = await makeRequest('/channels', {
+      id: channelId,
+      part: 'snippet,statistics,contentDetails,brandingSettings'
     });
     
-    return formatChannelDetailsData(data);
+    if (!data.items || data.items.length === 0) {
+      throw new Error(`Channel not found: ${channelId}`);
+    }
+    
+    return formatChannelDetailsData(data.items[0]);
   } catch (error) {
     logger.error('[YouTube API] Error getting channel details:', error);
     throw error;
@@ -260,7 +400,7 @@ export const getChannelDetails = async (channelId) => {
 
 /**
  * Fetch videos from a specific channel
- * @param {string} channelInput - YouTube channel ID
+ * @param {string} channelInput - YouTube channel ID or handle
  * @param {number} maxResults - Maximum number of results
  * @param {string} sortBy - Sort criteria: 'views', 'likes', 'comments', 'recency', 'engagement', 'relevance'
  * @returns {Promise<Array>} Array of video data
@@ -269,51 +409,126 @@ export const fetchChannelVideos = async (channelInput, maxResults = 20, sortBy =
   logger.log('[YouTube API] Fetching channel videos for:', channelInput);
   
   try {
-    // First, try to get channel details to validate the channel
     let channelId = channelInput;
     let channelInfo = null;
     
-    // If input looks like a channel ID, use it directly
+    // Step 1: Extract or find channel ID
     if (channelInput.startsWith('UC') && channelInput.length === 24) {
-      try {
-        channelInfo = await getChannelDetails(channelInput);
-        channelId = channelInput;
-      } catch (error) {
-        logger.warn('[YouTube API] Invalid channel ID, trying search:', error.message);
-        throw new Error(`Channel not found: ${channelInput}`);
-      }
+      // Already a channel ID
+      channelId = channelInput;
+      logger.log(`[YouTube API] Using provided channel ID: ${channelId}`);
     } else {
-      // Search for the channel first
-      const channels = await searchChannels(channelInput, 1);
-      if (channels.length === 0) {
-        throw new Error(`No channels found for: ${channelInput}`);
-      }
+      // Try to extract channel ID from URL or handle
+      const extractedId = extractChannelIdFromInput(channelInput);
+      logger.log(`[YouTube API] Extracted from input: ${extractedId}`);
       
-      const bestMatch = channels[0];
-      channelId = bestMatch.id;
-      channelInfo = await getChannelDetails(channelId);
+      if (extractedId && extractedId.startsWith('UC') && extractedId.length === 24) {
+        // Got a real channel ID from URL
+        channelId = extractedId;
+        logger.log(`[YouTube API] Using extracted channel ID: ${channelId}`);
+      } else {
+        // Need to search for the channel to get the actual ID
+        const searchTerm = extractedId || channelInput;
+        logger.log(`[YouTube API] Searching for channel: ${searchTerm}`);
+        const channels = await searchChannels(searchTerm, 1);
+        if (channels.length === 0) {
+          throw new Error(`No channels found for: ${searchTerm}`);
+        }
+        channelId = channels[0].id;
+        logger.log(`[YouTube API] Found channel ID from search: ${channelId}`);
+      }
     }
     
-    // For now, we'll search for videos from this channel using the channel name
-    // The YouTube Media Downloader API doesn't have a direct channel videos endpoint
-    const channelName = channelInfo.name;
-    const searchQuery = `channel:${channelName}`;
+    // Validate we have a proper channel ID
+    if (!channelId || !channelId.startsWith('UC') || channelId.length !== 24) {
+      throw new Error(`Invalid channel ID: ${channelId}. Expected UC* format with 24 characters.`);
+    }
     
-    logger.log(`[YouTube API] Searching for videos from channel: ${channelName}`);
+    logger.log(`[YouTube API] Final channel ID: ${channelId}`);
     
-    const videos = await searchVideos(searchQuery, maxResults, sortBy);
+    // Step 2: Get channel details
+    try {
+      channelInfo = await getChannelDetails(channelId);
+      logger.log(`[YouTube API] Got channel info: ${channelInfo?.name}`);
+    } catch (error) {
+      logger.warn('[YouTube API] Could not get channel details:', error.message);
+      // Continue without channel info
+    }
     
-    logger.log(`[YouTube API] Successfully fetched ${videos.length} videos from ${channelName}`);
+    // Step 3: Get channel videos using the official YouTube API
+    logger.log(`[YouTube API] Requesting videos for channel ID: ${channelId}`);
+    
+    // First, search for videos from this channel
+    const searchData = await makeRequest('/search', {
+      channelId: channelId,
+      part: 'snippet',
+      type: 'video',
+      maxResults: maxResults,
+      order: sortBy === 'views' ? 'viewCount' : sortBy === 'recency' ? 'date' : 'relevance'
+    });
+    
+    if (!searchData.items || searchData.items.length === 0) {
+      logger.warn('[YouTube API] No videos found for channel');
+      return {
+        videos: [],
+        channelInfo: channelInfo ? {
+          id: channelId,
+          title: channelInfo.name,
+          description: channelInfo.description,
+          subscriberCount: channelInfo.subscriberCount,
+          videoCount: channelInfo.videoCount,
+          confidence: 'high'
+        } : null
+      };
+    }
+    
+    // Get video IDs for detailed information
+    const videoIds = searchData.items.map(item => item.id.videoId).join(',');
+    
+    // Get detailed video information including statistics
+    const videoDetails = await makeRequest('/videos', {
+      id: videoIds,
+      part: 'snippet,statistics,contentDetails'
+    });
+    
+    // Step 4: Format the videos from channel videos response
+    const videos = videoDetails.items
+      .slice(0, maxResults)
+      .map(item => {
+        try {
+          const formattedVideo = formatVideoDetailsData(item);
+          // Set channel info from what we know
+          formattedVideo.channelName = channelInfo?.name || formattedVideo.channelName;
+          formattedVideo.channelId = channelId;
+          return formattedVideo;
+        } catch (error) {
+          logger.warn('[YouTube API] Failed to format video:', error);
+          return null;
+        }
+      })
+      .filter(video => video && video.title && video.id); // Filter out invalid videos
+    
+    // Step 5: Apply sorting
+    const sortedVideos = sortVideos(videos, sortBy);
+    
+    logger.log(`[YouTube API] Successfully fetched ${sortedVideos.length} videos from channel`);
     
     return {
-      videos,
-      channelInfo: {
+      videos: sortedVideos,
+      channelInfo: channelInfo ? {
         id: channelId,
         title: channelInfo.name,
         description: channelInfo.description,
         subscriberCount: channelInfo.subscriberCount,
         videoCount: channelInfo.videoCount,
         confidence: 'high'
+      } : {
+        id: channelId,
+        title: 'Unknown Channel',
+        description: '',
+        subscriberCount: 0,
+        videoCount: videos.length,
+        confidence: 'medium'
       }
     };
   } catch (error) {
@@ -323,7 +538,7 @@ export const fetchChannelVideos = async (channelInput, maxResults = 20, sortBy =
 };
 
 /**
- * Get search suggestions
+ * Get search suggestions (Note: Official YouTube API doesn't have suggestions endpoint)
  * @param {string} query - Partial search query
  * @returns {Promise<Array>} Array of suggestion strings
  */
@@ -331,11 +546,10 @@ export const getSearchSuggestions = async (query) => {
   if (!query || query.length < 2) return [];
   
   try {
-    const data = await makeRequest('/v2/search/suggestions', {
-      keyword: query
-    });
-    
-    return data.items || [];
+    // Official YouTube API v3 doesn't have a search suggestions endpoint
+    // You could use Google Suggest API or implement your own suggestion logic
+    logger.warn('[YouTube API] Search suggestions not available in official API');
+    return [];
   } catch (error) {
     logger.warn('[YouTube API] Error getting search suggestions:', error);
     return [];
@@ -343,64 +557,44 @@ export const getSearchSuggestions = async (query) => {
 };
 
 /**
- * Format video details data from the API response
- * @param {Object} data - Raw API response
+ * Format video details data from the official YouTube API v3 response
+ * @param {Object} item - Video item from API response
  * @returns {Object} Formatted video data
  */
-const formatVideoDetailsData = (data) => {
-  const publishedAt = new Date(data.publishedTime);
-  const daysAgo = Math.floor((Date.now() - publishedAt) / (1000 * 60 * 60 * 24));
+const formatVideoDetailsData = (item) => {
+  const snippet = item.snippet || {};
+  const statistics = item.statistics || {};
+  const contentDetails = item.contentDetails || {};
   
-  // Get the best thumbnail URL
-  const thumbnailUrl = data.thumbnails?.[0]?.url || '';
-  const secureThumbnailUrl = thumbnailUrl ? thumbnailUrl.replace('http://', 'https://') : null;
+  const publishedAt = snippet.publishedAt ? new Date(snippet.publishedAt) : new Date();
+  const daysAgo = Math.floor((Date.now() - publishedAt.getTime()) / (1000 * 60 * 60 * 24));
   
-  return {
-    id: data.id,
-    title: data.title,
-    channelName: data.channel?.name || 'Unknown Channel',
-    channelId: data.channel?.id || '',
-    thumbnail: secureThumbnailUrl,
-    thumbnails: data.thumbnails || [],
-    publishedAt: data.publishedTime,
-    duration: formatDuration(data.lengthSeconds),
-    metrics: {
-      viewCount: parseInt(data.viewCount || '0'),
-      likeCount: parseInt(data.likeCount || '0'),
-      commentCount: parseCommentCount(data.commentCountText),
-      publishedDaysAgo: daysAgo
-    },
-    // Default position (will be updated when added to canvas)
-    x: 100,
-    y: 100
-  };
-};
-
-/**
- * Format search item data (fallback when detailed data is not available)
- * @param {Object} item - Search result item
- * @returns {Object} Formatted video data
- */
-const formatSearchItemData = (item) => {
-  const daysAgo = 0; // Unknown, so default to recent
+  // Get the best thumbnail URL from official API structure
+  const thumbnails = snippet.thumbnails || {};
+  let thumbnailUrl = '';
   
-  // Get the best thumbnail URL
-  const thumbnailUrl = item.thumbnails?.[0]?.url || '';
+  // YouTube API v3 thumbnail quality order
+  if (thumbnails.maxres) thumbnailUrl = thumbnails.maxres.url;
+  else if (thumbnails.standard) thumbnailUrl = thumbnails.standard.url;
+  else if (thumbnails.high) thumbnailUrl = thumbnails.high.url;
+  else if (thumbnails.medium) thumbnailUrl = thumbnails.medium.url;
+  else if (thumbnails.default) thumbnailUrl = thumbnails.default.url;
+  
   const secureThumbnailUrl = thumbnailUrl ? thumbnailUrl.replace('http://', 'https://') : null;
   
   return {
     id: item.id,
-    title: item.title,
-    channelName: item.channel?.name || 'Unknown Channel',
-    channelId: item.channel?.id || '',
+    title: snippet.title || 'Unknown Title',
+    channelName: snippet.channelTitle || 'Unknown Channel',
+    channelId: snippet.channelId || '',
     thumbnail: secureThumbnailUrl,
-    thumbnails: item.thumbnails || [],
-    publishedAt: item.publishedTimeText || 'Unknown',
-    duration: item.lengthText || '0:00',
+    thumbnails: Object.values(thumbnails),
+    publishedAt: snippet.publishedAt || 'Unknown',
+    duration: formatDuration(parseDurationISO8601(contentDetails.duration)),
     metrics: {
-      viewCount: parseViewCount(item.viewCountText),
-      likeCount: 0, // Not available in search results
-      commentCount: 0, // Not available in search results
+      viewCount: parseInt(statistics.viewCount || '0'),
+      likeCount: parseInt(statistics.likeCount || '0'),
+      commentCount: parseInt(statistics.commentCount || '0'),
       publishedDaysAgo: daysAgo
     },
     // Default position (will be updated when added to canvas)
@@ -409,46 +603,72 @@ const formatSearchItemData = (item) => {
   };
 };
 
+
 /**
- * Format channel search data
- * @param {Object} item - Channel search result
+ * Format channel search data from official YouTube API v3
+ * @param {Object} item - Channel item from API response
  * @returns {Object} Formatted channel data
  */
 const formatChannelSearchData = (item) => {
+  const snippet = item.snippet || {};
+  const statistics = item.statistics || {};
+  
   return {
     id: item.id,
-    title: item.name,
-    description: item.description || '',
-    thumbnail: item.avatar?.[0]?.url || '',
-    subscriberCount: parseSubscriberCount(item.subscriberCountText),
-    videoCount: parseVideoCount(item.videoCountText),
-    isVerified: item.isVerified || false,
-    handle: item.handle || ''
+    title: snippet.title || snippet.channelTitle || 'Unknown Channel',
+    description: snippet.description || '',
+    thumbnail: snippet.thumbnails?.high?.url || snippet.thumbnails?.medium?.url || snippet.thumbnails?.default?.url || '',
+    subscriberCount: parseInt(statistics.subscriberCount || '0'),
+    videoCount: parseInt(statistics.videoCount || '0'),
+    isVerified: false, // Would need additional API call to get verification status
+    handle: snippet.customUrl || ''
   };
 };
 
 /**
- * Format channel details data
- * @param {Object} data - Channel details API response
+ * Format channel details data from official YouTube API v3
+ * @param {Object} item - Channel item from API response
  * @returns {Object} Formatted channel data
  */
-const formatChannelDetailsData = (data) => {
+const formatChannelDetailsData = (item) => {
+  const snippet = item.snippet || {};
+  const statistics = item.statistics || {};
+  const brandingSettings = item.brandingSettings || {};
+  
   return {
-    id: data.id,
-    name: data.name,
-    handle: data.handle || '',
-    description: data.description || '',
-    biography: data.biography || '',
-    isVerified: data.isVerified || false,
-    isVerifiedArtist: data.isVerifiedArtist || false,
-    subscriberCount: parseSubscriberCount(data.subscriberCountText),
-    videoCount: parseVideoCount(data.videoCountText),
-    viewCount: parseViewCount(data.viewCountText),
-    joinedDate: data.joinedDateText || '',
-    avatar: data.avatar || [],
-    banner: data.banner || [],
-    links: data.links || []
+    id: item.id,
+    name: snippet.title || 'Unknown Channel',
+    handle: snippet.customUrl || '',
+    description: snippet.description || '',
+    biography: brandingSettings.channel?.description || '',
+    isVerified: false, // Would need additional API call to get verification status
+    isVerifiedArtist: false,
+    subscriberCount: parseInt(statistics.subscriberCount || '0'),
+    videoCount: parseInt(statistics.videoCount || '0'),
+    viewCount: parseInt(statistics.viewCount || '0'),
+    joinedDate: snippet.publishedAt || '',
+    avatar: Object.values(snippet.thumbnails || {}),
+    banner: brandingSettings.image?.bannerExternalUrl ? [{ url: brandingSettings.image.bannerExternalUrl }] : [],
+    links: []
   };
+};
+
+/**
+ * Parse ISO8601 duration format (PT4M13S) to seconds
+ * @param {string} duration - ISO8601 duration string
+ * @returns {number} Duration in seconds
+ */
+const parseDurationISO8601 = (duration) => {
+  if (!duration) return 0;
+  
+  const matches = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!matches) return 0;
+  
+  const hours = parseInt(matches[1] || '0');
+  const minutes = parseInt(matches[2] || '0');
+  const seconds = parseInt(matches[3] || '0');
+  
+  return hours * 3600 + minutes * 60 + seconds;
 };
 
 /**
@@ -517,6 +737,79 @@ const parseCommentCount = (commentCountText) => {
   if (!commentCountText) return 0;
   return parseViewCount(commentCountText + ' comments'); // Add 'comments' for parsing
 };
+
+/**
+ * Parse published time text to days ago
+ * @param {string} publishedTimeText - Text like "3 hours ago", "2 days ago", "1 week ago"
+ * @returns {number} Days ago as number
+ */
+const parsePublishedTime = (publishedTimeText) => {
+  if (!publishedTimeText) return 0;
+  
+  const text = publishedTimeText.toLowerCase();
+  const number = parseInt(text.match(/\d+/)?.[0] || '0');
+  
+  if (text.includes('minute') || text.includes('hour')) {
+    return 0; // Less than a day
+  } else if (text.includes('day')) {
+    return number;
+  } else if (text.includes('week')) {
+    return number * 7;
+  } else if (text.includes('month')) {
+    return number * 30;
+  } else if (text.includes('year')) {
+    return number * 365;
+  }
+  
+  return 0;
+};
+
+/**
+ * Extract channel ID from various input formats
+ * @param {string} input - Channel URL, handle, or other identifier
+ * @returns {string|null} Channel ID or null if not found
+ */
+const extractChannelIdFromInput = (input) => {
+  if (!input) return null;
+  
+  const cleanInput = input.trim();
+  
+  // Already a channel ID
+  if (cleanInput.startsWith('UC') && cleanInput.length === 24) {
+    return cleanInput;
+  }
+  
+  // Extract from various YouTube URL formats
+  const patterns = [
+    // Channel ID URL: https://www.youtube.com/channel/UCJ5v_MCY6GNUBTO8-D3XoAg
+    /youtube\.com\/channel\/([a-zA-Z0-9_-]{24})/,
+    // Handle URL: https://www.youtube.com/@WWE
+    /youtube\.com\/@([a-zA-Z0-9_-]+)/,
+    // Custom URL: https://www.youtube.com/c/WWE
+    /youtube\.com\/c\/([a-zA-Z0-9_-]+)/,
+    // User URL: https://www.youtube.com/user/WWE
+    /youtube\.com\/user\/([a-zA-Z0-9_-]+)/,
+    // Just the handle: @WWE
+    /^@([a-zA-Z0-9_-]+)$/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = cleanInput.match(pattern);
+    if (match) {
+      const extracted = match[1];
+      // If it's a channel ID, return it
+      if (extracted.startsWith('UC') && extracted.length === 24) {
+        return extracted;
+      }
+      // Otherwise, return the handle/username (will need to be searched)
+      return extracted.startsWith('@') ? extracted : `@${extracted}`;
+    }
+  }
+  
+  // If no pattern matches, assume it's a channel name or handle
+  return cleanInput.startsWith('@') ? cleanInput : `@${cleanInput}`;
+};
+
 
 /**
  * Sort videos by performance metrics
@@ -703,13 +996,51 @@ const parseDurationToSeconds = (duration) => {
   return 0;
 };
 
-// Get API usage statistics
+// Get API usage statistics including key rotation data
 export const getAPIUsage = () => {
   return {
     requests: API_USAGE.requests,
     lastReset: API_USAGE.lastReset,
     maxRequestsPerHour: API_USAGE.maxRequestsPerHour,
-    maxRequestsPerDay: API_USAGE.maxRequestsPerDay
+    maxRequestsPerDay: API_USAGE.maxRequestsPerDay,
+    apiKeys: {
+      total: API_KEYS.length,
+      currentIndex: API_KEY_STATE.currentIndex,
+      usageCount: { ...API_KEY_STATE.usageCount },
+      failureCount: { ...API_KEY_STATE.failureCount },
+      lastRotation: API_KEY_STATE.lastRotation,
+      rotationThreshold: API_KEY_STATE.rotationThreshold
+    }
+  };
+};
+
+/**
+ * Get API key rotation statistics for monitoring
+ * @returns {Object} Rotation statistics
+ */
+export const getKeyRotationStats = () => {
+  const totalUsage = Object.values(API_KEY_STATE.usageCount).reduce((sum, count) => sum + count, 0);
+  const totalFailures = Object.values(API_KEY_STATE.failureCount).reduce((sum, count) => sum + count, 0);
+  
+  return {
+    totalKeys: API_KEYS.length,
+    currentKey: API_KEY_STATE.currentIndex,
+    totalRequests: totalUsage,
+    totalFailures: totalFailures,
+    successRate: totalUsage > 0 ? ((totalUsage - totalFailures) / totalUsage * 100).toFixed(2) : '100.00',
+    keyStats: API_KEYS.map((_, index) => ({
+      keyIndex: index,
+      requests: API_KEY_STATE.usageCount[index] || 0,
+      failures: API_KEY_STATE.failureCount[index] || 0,
+      successRate: API_KEY_STATE.usageCount[index] > 0 
+        ? (((API_KEY_STATE.usageCount[index] - API_KEY_STATE.failureCount[index]) / API_KEY_STATE.usageCount[index]) * 100).toFixed(2)
+        : '100.00'
+    })),
+    rotationInfo: {
+      lastRotation: new Date(API_KEY_STATE.lastRotation).toISOString(),
+      rotationThreshold: API_KEY_STATE.rotationThreshold,
+      timeSinceLastRotation: Math.floor((Date.now() - API_KEY_STATE.lastRotation) / 1000 / 60) // minutes
+    }
   };
 };
 
